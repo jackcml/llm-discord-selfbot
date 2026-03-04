@@ -1,0 +1,53 @@
+discord:
+  token: "your-user-token-here"
+
+llm:
+  # Provider base URLs:
+  #   Anthropic:  https://api.anthropic.com/v1/
+  #   OpenAI:     https://api.openai.com/v1
+  #   xAI/Grok:   https://api.x.ai/v1
+  #   OpenRouter:  https://openrouter.ai/api/v1
+  #   Ollama:     http://localhost:11434/v1
+  base_url: "https://api.anthropic.com/v1/"
+  api_key: "your-api-key-here"
+  model: "claude-sonnet-4-6"
+  max_tokens: 1024
+  temperature: 1.0 # 0.0 = deterministic, 1.0 = max creativity
+  vision: false # pass image attachments to the model (requires a vision-capable model)
+  system_prompt: |
+    You are a casual Discord user. Keep responses concise and conversational.
+    Match the tone of the channel. Avoid long-winded replies.
+
+reply_modes:
+  mention:
+    enabled: true
+    channel_ids: [] # empty = all channels
+    user_ids: [] # empty = respond to all users
+
+  random:
+    enabled: false
+    one_in: 50 # reply to 1 in every 50 messages (probabilistic)
+    channel_ids: [] # empty = all channels
+
+  interesting:
+    enabled: false
+    interval_minutes: 15
+    channel_ids: [] # empty = monitor all channels
+    lookback_messages: 50
+
+context:
+  channels:
+    max_messages: 30
+    max_message_length: 500
+    max_conversation_turns: 20 # how many exchanges to remember per user per channel
+  dms:
+    max_messages: 50
+    max_message_length: 1000
+
+behavior:
+  typing_indicator: true
+  simulated_typing_delay: false # delay replies based on response length to seem human
+  ignore_bots: true
+  reply_to_dms: true # respond to 1-on-1 direct messages (always replies)
+  reply_to_group_dms: false # respond in group DMs (only when mentioned)
+  command_prefix: ">"
