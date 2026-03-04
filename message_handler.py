@@ -173,7 +173,7 @@ class MessageHandler:
                 bot_entry = {
                     "author": self.bot.user.display_name,
                     "author_id": self.bot.user.id,
-                    "content": response[: self.config["context"]["max_message_length"]],
+                    "content": response[: self.ctx.channel_max_length],
                     "id": sent_message.id,
                     "is_self": True,
                 }
