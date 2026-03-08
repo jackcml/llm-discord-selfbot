@@ -12,7 +12,7 @@ llm:
   api_key: "your-api-key-here"
   model: "claude-sonnet-4-6"
   max_tokens: 1024
-  temperature: 1.0 # 0.0 = deterministic, 1.0 = max creativity
+  temperature: 1.0
   vision: false # pass image attachments to the model (requires a vision-capable model)
   system_prompt: |
     You are a casual Discord user. Keep responses concise and conversational.
@@ -49,5 +49,5 @@ behavior:
   simulated_typing_delay: false # delay replies based on response length to seem human
   ignore_bots: true
   reply_to_dms: true # respond to 1-on-1 direct messages (always replies)
-  reply_to_group_dms: false # respond in group DMs (only when mentioned)
+  reply_to_group_dms: true # respond in group DMs (only when mentioned)
   command_prefix: ">"
