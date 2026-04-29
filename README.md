@@ -11,6 +11,7 @@ A Discord selfbot that interfaces with any OpenAI-compatible LLM API to automati
 - **Choice replies**: periodically reviews recent messages and picks one to reply to
 - **DM support**: always replies in 1-on-1 DMs; mention-only in group DMs (both independently toggleable)
 - **Vision support**: understands images when using a vision-capable model
+- **Web search tool**: opt-in Chat Completions function tool for current information
 - **Conversation memory**: per-user conversation tracking that persists through channel noise
 - **Provider-agnostic**: works with any OpenAI-compatible API (Anthropic, xAI/Grok, OpenAI, OpenRouter, etc.)
 - **Human-like typing delay**: configurable simulated typing indicator
@@ -41,6 +42,7 @@ All commands use the configured prefix (default `>`). Only the selfbot's own use
 | `>toggle interesting` | Enable/disable interesting picker |
 | `>toggle dms`         | Enable/disable DM replies         |
 | `>toggle groupdms`    | Enable/disable group DM replies   |
+| `>toggle websearch`   | Enable/disable web search tool    |
 | `>status`             | Show current configuration        |
 | `>model <name>`       | Switch LLM model                  |
 | `>prompt <text>`      | Update system prompt              |
@@ -54,4 +56,5 @@ See [`config.example.yaml`](config.example.yaml) for all options including:
 - Channel and user ID whitelists for mention/random modes
 - Separate context limits for DMs vs channels
 - Vision toggle, typing delay, bot ignoring
+- Web search tool toggle and result limits
 - Interesting picker interval and lookback settings

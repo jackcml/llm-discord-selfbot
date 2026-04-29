@@ -14,6 +14,10 @@ llm:
   max_tokens: 1024
   temperature: 1.0
   vision: false # pass image attachments to the model (requires a vision-capable model)
+  web_search:
+    enabled: true # expose a web_search function tool to tool-capable chat models
+    max_results: 5 # cap results returned to the model per search
+    max_tool_rounds: 5 # max tool-call iterations before giving up
   system_prompt: |
     You are a casual Discord user. Keep responses concise and conversational.
     Match the tone of the channel. Avoid long-winded replies.
@@ -37,17 +41,17 @@ reply_modes:
 
 context:
   channels:
-    max_messages: 30
+    max_messages: 15
     max_message_length: 500
-    max_conversation_turns: 20 # how many exchanges to remember per user per channel
+    max_conversation_turns: 10 # how many exchanges to remember per user per channel
   dms:
-    max_messages: 50
+    max_messages: 25
     max_message_length: 1000
 
 behavior:
   typing_indicator: true
   simulated_typing_delay: false # delay replies based on response length to seem human
   ignore_bots: true
-  reply_to_dms: true # respond to 1-on-1 direct messages (always replies)
-  reply_to_group_dms: true # respond in group DMs (only when mentioned)
+  reply_to_dms: false # respond to 1-on-1 direct messages (always replies)
+  reply_to_group_dms: false # respond in group DMs (only when mentioned)
   command_prefix: ">"

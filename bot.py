@@ -90,9 +90,18 @@ async def toggle_mode(ctx, mode: str):
         config["behavior"]["reply_to_group_dms"] = not current
         state = "enabled" if not current else "disabled"
         await ctx.message.edit(content=f"Group DM replies **{state}**.")
+    elif mode in {"websearch", "web_search"}:
+        current = llm.web_search_enabled
+        llm.web_search_enabled = not current
+        config["llm"].setdefault("web_search", {})["enabled"] = not current
+        state = "enabled" if not current else "disabled"
+        await ctx.message.edit(content=f"Web search tool **{state}**.")
     else:
         await ctx.message.edit(
-            content=f"Unknown mode `{mode}`. Use: random, interesting, mention, dms, groupdms"
+            content=(
+                f"Unknown mode `{mode}`. Use: random, interesting, mention, "
+                "dms, groupdms, websearch"
+            )
         )
 
 
@@ -113,6 +122,7 @@ async def show_status(ctx):
         ),
         f"**DM replies**: {'on' if config['behavior'].get('reply_to_dms', True) else 'off'}",
         f"**Group DM replies**: {'on' if config['behavior'].get('reply_to_group_dms', False) else 'off'} (mention only)",
+        f"**Web search tool**: {'on' if llm.web_search_enabled else 'off'}",
     ]
     await ctx.message.edit(content="\n".join(lines))
 
