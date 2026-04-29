@@ -33,34 +33,37 @@ WEB_SEARCH_TOOL = {
     },
 }
 
-WEB_FETCH_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "web_fetch",
-        "description": (
-            "Fetch a specific public web page URL and return readable page text. Use "
-            "this after web_search when a result needs to be opened, or when the user "
-            "provides a link that must be inspected directly."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "url": {
-                    "type": "string",
-                    "description": "Absolute http or https URL to fetch.",
+def _web_fetch_tool(max_chars: int, hard_max_chars: int) -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": "web_fetch",
+            "description": (
+                "Fetch a specific public web page URL and return readable page text. "
+                "Use this after web_search when a result needs to be opened, or when "
+                "the user provides a link that must be inspected directly. Use larger "
+                "max_chars values for user-provided chat logs or documents that need "
+                "broader analysis."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "Absolute http or https URL to fetch.",
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "description": "Maximum readable text characters to return.",
+                        "minimum": 500,
+                        "maximum": hard_max_chars,
+                        "default": max_chars,
+                    },
                 },
-                "max_chars": {
-                    "type": "integer",
-                    "description": "Maximum readable text characters to return.",
-                    "minimum": 500,
-                    "maximum": 12000,
-                    "default": 4000,
-                },
+                "required": ["url"],
             },
-            "required": ["url"],
         },
-    },
-}
+    }
 
 
 class LLMClient:
@@ -77,6 +80,14 @@ class LLMClient:
         self.web_search_enabled = web_search_config.get("enabled", False)
         self.web_search_max_results = web_search_config.get("max_results", 5)
         self.web_search_max_rounds = web_search_config.get("max_tool_rounds", 2)
+        self.web_fetch_max_chars = int(web_search_config.get("fetch_max_chars", 12000))
+        self.web_fetch_hard_max_chars = int(
+            web_search_config.get("fetch_hard_max_chars", 100000)
+        )
+        self.web_fetch_max_chars = max(500, self.web_fetch_max_chars)
+        self.web_fetch_hard_max_chars = max(
+            self.web_fetch_max_chars, self.web_fetch_hard_max_chars
+        )
 
     async def reply(self, conversation: list[dict]) -> str | None:
         """Send conversation history and return the response text.
@@ -95,7 +106,12 @@ class LLMClient:
     ) -> str | None:
         """Send messages to Chat Completions, optionally handling tool calls."""
         tools = (
-            [WEB_SEARCH_TOOL, WEB_FETCH_TOOL]
+            [
+                WEB_SEARCH_TOOL,
+                _web_fetch_tool(
+                    self.web_fetch_max_chars, self.web_fetch_hard_max_chars
+                ),
+            ]
             if allow_tools and self.web_search_enabled
             else None
         )
@@ -190,11 +206,12 @@ class LLMClient:
             content = await web_search(query, max_results=max_results)
         elif name == "web_fetch":
             url = str(args.get("url", ""))
-            requested = args.get("max_chars", 4000)
+            requested = args.get("max_chars", self.web_fetch_max_chars)
             try:
                 max_chars = int(requested)
             except (TypeError, ValueError):
-                max_chars = 4000
+                max_chars = self.web_fetch_max_chars
+            max_chars = max(500, min(max_chars, self.web_fetch_hard_max_chars))
             content = await web_fetch(url, max_chars=max_chars)
         else:
             content = json.dumps({"error": f"unknown tool: {name}"})

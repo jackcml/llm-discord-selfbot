@@ -18,6 +18,8 @@ llm:
     enabled: true # expose a web_search function tool to tool-capable chat models
     max_results: 5 # cap results returned to the model per search
     max_tool_rounds: 5 # max tool-call iterations before giving up
+    fetch_max_chars: 12000 # default readable chars returned by web_fetch
+    fetch_hard_max_chars: 100000 # max readable chars web_fetch may request for long logs/docs
   system_prompt: |
     You are a casual Discord user. Keep responses concise and conversational.
     Match the tone of the channel. Avoid long-winded replies.

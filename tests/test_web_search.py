@@ -180,7 +180,7 @@ def test_web_fetch_extracts_readable_html(monkeypatch):
     assert "llm-discord-selfbot" in request.headers["User-agent"]
 
 
-def test_web_fetch_clamps_max_chars_and_truncates_plain_text(monkeypatch):
+def test_web_fetch_enforces_min_chars_and_truncates_plain_text(monkeypatch):
     def fake_urlopen(request, timeout):
         return _FakeResponse("x" * 800, headers={"Content-Type": "text/plain"})
 
@@ -192,4 +192,21 @@ def test_web_fetch_clamps_max_chars_and_truncates_plain_text(monkeypatch):
     )
 
     assert payload["text"] == "x" * 500
+    assert payload["truncated"] is True
+
+
+def test_web_fetch_allows_large_config_clamped_char_counts(monkeypatch):
+    def fake_urlopen(request, timeout):
+        return _FakeResponse("x" * 13000, headers={"Content-Type": "text/plain"})
+
+    monkeypatch.setattr(web_search_module.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(web_search_module.asyncio, "to_thread", _run_without_thread)
+
+    payload = json.loads(
+        asyncio.run(
+            web_search_module.web_fetch("https://example.com/log", max_chars=12000)
+        )
+    )
+
+    assert len(payload["text"]) == 12000
     assert payload["truncated"] is True

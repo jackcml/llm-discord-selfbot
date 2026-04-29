@@ -56,5 +56,5 @@ See [`config.example.yaml`](config.example.yaml) for all options including:
 - Channel and user ID whitelists for mention/random modes
 - Separate context limits for DMs vs channels
 - Vision toggle, typing delay, bot ignoring
-- Web search tool toggle and result limits
+- Web search/fetch tool toggle and result/character limits
 - Interesting picker interval and lookback settings

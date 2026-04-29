@@ -205,7 +205,7 @@ async def web_fetch(url: str, max_chars: int = 4000) -> str:
             ensure_ascii=True,
         )
 
-    max_chars = max(500, min(max_chars, 12000))
+    max_chars = max(500, max_chars)
     try:
         fetch_task = asyncio.to_thread(_fetch_url_sync, url, max_chars)
         result = await asyncio.wait_for(fetch_task, timeout=12)
