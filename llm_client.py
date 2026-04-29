@@ -2,7 +2,7 @@ import json
 
 from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APIStatusError
 
-from web_search import web_search
+from web_search import web_fetch, web_search
 
 WEB_SEARCH_TOOL = {
     "type": "function",
@@ -29,6 +29,35 @@ WEB_SEARCH_TOOL = {
                 },
             },
             "required": ["query"],
+        },
+    },
+}
+
+WEB_FETCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "web_fetch",
+        "description": (
+            "Fetch a specific public web page URL and return readable page text. Use "
+            "this after web_search when a result needs to be opened, or when the user "
+            "provides a link that must be inspected directly."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Absolute http or https URL to fetch.",
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "description": "Maximum readable text characters to return.",
+                    "minimum": 500,
+                    "maximum": 12000,
+                    "default": 4000,
+                },
+            },
+            "required": ["url"],
         },
     },
 }
@@ -65,7 +94,11 @@ class LLMClient:
         self, messages: list[dict], allow_tools: bool = False
     ) -> str | None:
         """Send messages to Chat Completions, optionally handling tool calls."""
-        tools = [WEB_SEARCH_TOOL] if allow_tools and self.web_search_enabled else None
+        tools = (
+            [WEB_SEARCH_TOOL, WEB_FETCH_TOOL]
+            if allow_tools and self.web_search_enabled
+            else None
+        )
 
         try:
             for _ in range(max(1, self.web_search_max_rounds + 1)):
@@ -155,6 +188,14 @@ class LLMClient:
                 max_results = self.web_search_max_results
             max_results = min(max_results, self.web_search_max_results)
             content = await web_search(query, max_results=max_results)
+        elif name == "web_fetch":
+            url = str(args.get("url", ""))
+            requested = args.get("max_chars", 4000)
+            try:
+                max_chars = int(requested)
+            except (TypeError, ValueError):
+                max_chars = 4000
+            content = await web_fetch(url, max_chars=max_chars)
         else:
             content = json.dumps({"error": f"unknown tool: {name}"})
 

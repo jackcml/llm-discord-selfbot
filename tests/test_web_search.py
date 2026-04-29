@@ -9,8 +9,18 @@ async def _run_without_thread(func, *args, **kwargs):
 
 
 class _FakeResponse:
-    def __init__(self, body: str):
+    def __init__(
+        self,
+        body: str,
+        *,
+        url: str = "https://example.com",
+        status: int = 200,
+        headers: dict | None = None,
+    ):
         self._body = body.encode("utf-8")
+        self._url = url
+        self.status = status
+        self.headers = headers or {}
 
     def __enter__(self):
         return self
@@ -18,8 +28,13 @@ class _FakeResponse:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def read(self):
-        return self._body
+    def read(self, amt=None):
+        if amt is None:
+            return self._body
+        return self._body[:amt]
+
+    def geturl(self):
+        return self._url
 
 
 def test_empty_query_returns_error_without_searching(monkeypatch):
@@ -106,3 +121,75 @@ def test_duckduckgo_html_parser_decodes_results(monkeypatch):
     assert timeout == 10
     assert "q=example+query" in request.full_url
     assert "llm-discord-selfbot" in request.headers["User-agent"]
+
+
+def test_web_fetch_rejects_empty_and_non_http_urls():
+    empty = json.loads(asyncio.run(web_search_module.web_fetch("   ")))
+    invalid = json.loads(asyncio.run(web_search_module.web_fetch("file:///etc/passwd")))
+
+    assert empty == {"url": "", "error": "empty url"}
+    assert invalid == {
+        "url": "file:///etc/passwd",
+        "error": "url must be absolute http or https",
+    }
+
+
+def test_web_fetch_extracts_readable_html(monkeypatch):
+    html = """
+    <html>
+      <head>
+        <title> Example Page </title>
+        <style>body { display: none }</style>
+      </head>
+      <body>
+        <h1>Hello</h1>
+        <script>ignored()</script>
+        <p>Readable   text.</p>
+      </body>
+    </html>
+    """
+    captured_requests = []
+
+    def fake_urlopen(request, timeout):
+        captured_requests.append((request, timeout))
+        return _FakeResponse(
+            html,
+            url="https://example.com/final",
+            headers={"Content-Type": "text/html; charset=utf-8"},
+        )
+
+    monkeypatch.setattr(web_search_module.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(web_search_module.asyncio, "to_thread", _run_without_thread)
+
+    payload = json.loads(
+        asyncio.run(web_search_module.web_fetch("https://example.com/page"))
+    )
+
+    assert payload == {
+        "url": "https://example.com/page",
+        "final_url": "https://example.com/final",
+        "status": 200,
+        "content_type": "text/html; charset=utf-8",
+        "title": "Example Page",
+        "text": "Hello Readable text.",
+        "truncated": False,
+    }
+    request, timeout = captured_requests[0]
+    assert timeout == 10
+    assert request.full_url == "https://example.com/page"
+    assert "llm-discord-selfbot" in request.headers["User-agent"]
+
+
+def test_web_fetch_clamps_max_chars_and_truncates_plain_text(monkeypatch):
+    def fake_urlopen(request, timeout):
+        return _FakeResponse("x" * 800, headers={"Content-Type": "text/plain"})
+
+    monkeypatch.setattr(web_search_module.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(web_search_module.asyncio, "to_thread", _run_without_thread)
+
+    payload = json.loads(
+        asyncio.run(web_search_module.web_fetch("https://example.com/text", max_chars=10))
+    )
+
+    assert payload["text"] == "x" * 500
+    assert payload["truncated"] is True
