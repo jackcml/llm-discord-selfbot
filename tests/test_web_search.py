@@ -63,7 +63,9 @@ def test_web_search_serializes_search_errors(monkeypatch):
     monkeypatch.setattr(web_search_module, "_search_duckduckgo_sync", fake_search)
     monkeypatch.setattr(web_search_module.asyncio, "to_thread", _run_without_thread)
 
-    payload = json.loads(asyncio.run(web_search_module.web_search("news", max_results=3)))
+    payload = json.loads(
+        asyncio.run(web_search_module.web_search("news", max_results=3))
+    )
 
     assert payload["query"] == "news"
     assert payload["results"] == []

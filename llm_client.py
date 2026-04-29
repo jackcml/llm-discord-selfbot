@@ -4,7 +4,6 @@ from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APIStatusErr
 
 from web_search import web_search
 
-
 WEB_SEARCH_TOOL = {
     "type": "function",
     "function": {
@@ -62,7 +61,9 @@ class LLMClient:
 
         return await self._chat(messages, allow_tools=True)
 
-    async def _chat(self, messages: list[dict], allow_tools: bool = False) -> str | None:
+    async def _chat(
+        self, messages: list[dict], allow_tools: bool = False
+    ) -> str | None:
         """Send messages to Chat Completions, optionally handling tool calls."""
         tools = [WEB_SEARCH_TOOL] if allow_tools and self.web_search_enabled else None
 

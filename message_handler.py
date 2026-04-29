@@ -75,7 +75,9 @@ class MessageHandler:
             return False
         # Channel filter: empty list = all channels
         allowed_channels = mc.get("channel_ids", [])
-        if allowed_channels and not self._id_in_list(message.channel.id, allowed_channels):
+        if allowed_channels and not self._id_in_list(
+            message.channel.id, allowed_channels
+        ):
             return False
         # User filter: empty list = all users
         allowed_users = mc.get("user_ids", [])
@@ -178,6 +180,8 @@ class MessageHandler:
                     "is_self": True,
                 }
                 self.ctx.record_exchange(
-                    message.channel.id, message.author.id,
-                    user_entry, bot_entry,
+                    message.channel.id,
+                    message.author.id,
+                    user_entry,
+                    bot_entry,
                 )

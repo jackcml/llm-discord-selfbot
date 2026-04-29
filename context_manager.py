@@ -20,7 +20,9 @@ class ContextManager:
             # Legacy flat config
             self.channel_max_messages = context_config["max_messages_per_channel"]
             self.channel_max_length = context_config["max_message_length"]
-            self.channel_max_conv_turns = context_config.get("max_conversation_turns", 20)
+            self.channel_max_conv_turns = context_config.get(
+                "max_conversation_turns", 20
+            )
             self.dm_max_messages = self.channel_max_messages
             self.dm_max_length = self.channel_max_length
 
@@ -57,7 +59,11 @@ class ContextManager:
         return self.conversations[key]
 
     def _max_length_for(self, channel_id: int) -> int:
-        return self.dm_max_length if channel_id in self._dm_channel_ids else self.channel_max_length
+        return (
+            self.dm_max_length
+            if channel_id in self._dm_channel_ids
+            else self.channel_max_length
+        )
 
     def add_message(self, message: discord.Message):
         """Record a message into the channel's context buffer."""
@@ -77,7 +83,9 @@ class ContextManager:
         buf = self._get_buffer(message.channel.id, is_dm)
         buf.append(entry)
 
-    def record_exchange(self, channel_id: int, user_id: int, user_entry: dict, bot_entry: dict):
+    def record_exchange(
+        self, channel_id: int, user_id: int, user_entry: dict, bot_entry: dict
+    ):
         """Record a direct exchange (user message + bot reply) in the conversation tracker.
 
         Called by MessageHandler after successfully replying to someone.
@@ -117,7 +125,9 @@ class ContextManager:
 
         # Truncate to only messages up to the trigger message
         if up_to_message_id is not None:
-            channel_entries = [e for e in channel_entries if e["id"] <= up_to_message_id]
+            channel_entries = [
+                e for e in channel_entries if e["id"] <= up_to_message_id
+            ]
 
         if target_user_id is not None:
             # Merge in conversation-specific history
@@ -127,7 +137,9 @@ class ContextManager:
                 conv_entries = list(conv)
                 # Also truncate conversation history to the trigger
                 if up_to_message_id is not None:
-                    conv_entries = [e for e in conv_entries if e["id"] <= up_to_message_id]
+                    conv_entries = [
+                        e for e in conv_entries if e["id"] <= up_to_message_id
+                    ]
                 # Dedupe by message ID
                 seen_ids = {e["id"] for e in channel_entries}
                 for entry in conv_entries:
@@ -147,7 +159,11 @@ class ContextManager:
                 text = entry["content"]
             else:
                 role = "user"
-                text = f"{entry['author']}: {entry['content']}" if entry["content"] else f"{entry['author']}:"
+                text = (
+                    f"{entry['author']}: {entry['content']}"
+                    if entry["content"]
+                    else f"{entry['author']}:"
+                )
 
             images = entry.get("images", [])
 
@@ -155,10 +171,12 @@ class ContextManager:
             if vision_enabled and images:
                 content = [{"type": "text", "text": text}]
                 for img in images:
-                    content.append({
-                        "type": "image_url",
-                        "image_url": {"url": img["url"]},
-                    })
+                    content.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": img["url"]},
+                        }
+                    )
             else:
                 content = text
 
@@ -175,7 +193,9 @@ class ContextManager:
                     # Previous is a plain string
                     if isinstance(content, list):
                         # Upgrade previous to multi-part, then append new parts
-                        messages[-1]["content"] = [{"type": "text", "text": prev_content}] + content
+                        messages[-1]["content"] = [
+                            {"type": "text", "text": prev_content}
+                        ] + content
                     else:
                         messages[-1]["content"] = f"{prev_content}\n{content}"
             else:
@@ -203,9 +223,7 @@ class ContextManager:
             lines.append(line)
         return "\n".join(lines)
 
-    def find_message_id_by_content(
-        self, channel_id: int, snippet: str
-    ) -> int | None:
+    def find_message_id_by_content(self, channel_id: int, snippet: str) -> int | None:
         """Look up a message ID from the buffer by matching content substring."""
         buf = self.buffers.get(channel_id)
         if not buf:
