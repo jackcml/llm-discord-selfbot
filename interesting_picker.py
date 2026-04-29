@@ -95,6 +95,7 @@ class InterestingPicker:
                 ch
                 for cid in self.channel_ids
                 if (ch := self.bot.get_channel(cid)) is not None
+                and isinstance(ch, discord.TextChannel)
             ]
         channels = []
         for guild in self.bot.guilds:

@@ -24,8 +24,12 @@ class MessageHandler:
 
     async def handle(self, message: discord.Message):
         """Process an incoming message and decide whether to reply."""
+        bot_user = self.bot.user
+        if bot_user is None:
+            return
+
         # Never reply to ourselves (prevent infinite loops)
-        if message.author.id == self.bot.user.id:
+        if message.author.id == bot_user.id:
             return
 
         # Optionally ignore bots
@@ -49,7 +53,7 @@ class MessageHandler:
         if is_group_dm:
             # Group DMs: only reply when mentioned (if enabled)
             if self.config["behavior"].get("reply_to_group_dms", False):
-                if self.bot.user.mentioned_in(message):
+                if bot_user.mentioned_in(message):
                     await self._reply_to(message)
             return
 
@@ -83,7 +87,8 @@ class MessageHandler:
         allowed_users = mc.get("user_ids", [])
         if allowed_users and not self._id_in_list(message.author.id, allowed_users):
             return False
-        return self.bot.user.mentioned_in(message)
+        bot_user = self.bot.user
+        return bot_user is not None and bot_user.mentioned_in(message)
 
     def _should_random_reply(self, channel_id: int) -> bool:
         """Roll the dice for random reply mode."""
@@ -168,13 +173,16 @@ class MessageHandler:
         # even after the channel buffer scrolls past it (guild channels only —
         # DMs don't need this since there's no noise from other users)
         if sent_message is not None and not is_dm:
+            bot_user = self.bot.user
+            if bot_user is None:
+                return
             user_entry = self.ctx.get_entry_by_message_id(
                 message.channel.id, message.id
             )
             if user_entry:
                 bot_entry = {
-                    "author": self.bot.user.display_name,
-                    "author_id": self.bot.user.id,
+                    "author": bot_user.display_name,
+                    "author_id": bot_user.id,
                     "content": response[: self.ctx.channel_max_length],
                     "id": sent_message.id,
                     "is_self": True,

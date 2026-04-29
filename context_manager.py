@@ -1,4 +1,5 @@
 from collections import deque
+from typing import Any
 
 import discord
 
@@ -152,7 +153,7 @@ class ContextManager:
             return []
 
         # Convert to OpenAI-compatible format
-        messages = []
+        messages: list[dict[str, Any]] = []
         for entry in channel_entries:
             if entry["is_self"]:
                 role = "assistant"

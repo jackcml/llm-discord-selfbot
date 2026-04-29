@@ -58,7 +58,7 @@ async def on_error(event, *args, **kwargs):
 
 
 @bot.command(name="toggle")
-async def toggle_mode(ctx, mode: str):
+async def toggle_mode(ctx: commands.Context[commands.Bot], mode: str):
     """Toggle a reply mode on/off. Usage: >toggle random | >toggle interesting"""
     mode = mode.lower()
     if mode == "random":
@@ -106,7 +106,7 @@ async def toggle_mode(ctx, mode: str):
 
 
 @bot.command(name="status")
-async def show_status(ctx):
+async def show_status(ctx: commands.Context[commands.Bot]):
     """Show current bot status and mode states."""
     rm = config["reply_modes"]
     lines = [
@@ -128,21 +128,21 @@ async def show_status(ctx):
 
 
 @bot.command(name="model")
-async def set_model(ctx, model_name: str):
+async def set_model(ctx: commands.Context[commands.Bot], model_name: str):
     """Change the model at runtime. Usage: >model gpt-4o"""
     llm.model = model_name
     await ctx.message.edit(content=f"Model set to `{model_name}`.")
 
 
 @bot.command(name="prompt")
-async def set_prompt(ctx, *, text: str):
+async def set_prompt(ctx: commands.Context[commands.Bot], *, text: str):
     """Update the system prompt at runtime. Usage: >prompt You are a helpful assistant."""
     llm.system_prompt = text
     await ctx.message.edit(content=f"System prompt updated ({len(text)} chars).")
 
 
 @bot.command(name="odds")
-async def set_odds(ctx, n: int):
+async def set_odds(ctx: commands.Context[commands.Bot], n: int):
     """Set random reply odds. Usage: >odds 25 (reply to 1 in 25 messages)"""
     if n < 1:
         await ctx.message.edit(content="Odds must be at least 1.")
@@ -152,7 +152,7 @@ async def set_odds(ctx, n: int):
 
 
 @bot.command(name="temp")
-async def set_temperature(ctx, value: float):
+async def set_temperature(ctx: commands.Context[commands.Bot], value: float):
     """Set LLM temperature. Usage: >temp 0.7"""
     llm.temperature = value
     await ctx.message.edit(content=f"Temperature set to `{value}`.")
