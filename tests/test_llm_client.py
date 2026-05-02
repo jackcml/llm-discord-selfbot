@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import llm_client as llm_client_module
@@ -110,3 +111,77 @@ def test_web_fetch_tool_schema_uses_configured_limits():
     max_chars_schema = tool["function"]["parameters"]["properties"]["max_chars"]
     assert max_chars_schema["default"] == 12000
     assert max_chars_schema["maximum"] == 100000
+
+
+def test_chat_wraps_tool_calls_in_activity_context(monkeypatch):
+    client = object.__new__(LLMClient)
+    client.model = "test-model"
+    client.max_tokens = 100
+    client.temperature = 1.0
+    client.web_search_enabled = True
+    client.web_search_max_rounds = 1
+    client.web_fetch_max_chars = 12000
+    client.web_fetch_hard_max_chars = 100000
+    client.web_search_log_payloads = False
+    events = []
+
+    first_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="tool_calls",
+                message=SimpleNamespace(
+                    content="",
+                    tool_calls=[_tool_call()],
+                ),
+            )
+        ]
+    )
+    final_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(content="done", tool_calls=None),
+            )
+        ]
+    )
+
+    class FakeCompletions:
+        def __init__(self):
+            self.responses = [first_response, final_response]
+
+        async def create(self, **kwargs):
+            return self.responses.pop(0)
+
+    client.client = SimpleNamespace(
+        chat=SimpleNamespace(completions=FakeCompletions())
+    )
+
+    @asynccontextmanager
+    async def activity_context():
+        events.append("enter")
+        try:
+            yield
+        finally:
+            events.append("exit")
+
+    async def fake_run_tool_call(tool_call):
+        events.append("tool")
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "name": tool_call.function.name,
+            "content": '{"results": []}',
+        }
+
+    monkeypatch.setattr(client, "_run_tool_call", fake_run_tool_call)
+
+    result = asyncio.run(
+        client._chat(
+            [{"role": "user", "content": "search"}],
+            allow_tools=True,
+            tool_activity_context=activity_context,
+        )
+    )
+
+    assert result == "done"
+    assert events == ["enter", "tool", "exit"]

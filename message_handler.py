@@ -1,5 +1,7 @@
 import asyncio
 import random
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import discord
 from discord.ext import commands
@@ -132,7 +134,10 @@ class MessageHandler:
             return
 
         # Generate the response first (not visible to others yet)
-        response = await self.llm.reply(conversation)
+        response = await self.llm.reply(
+            conversation,
+            tool_activity_context=lambda: self._tool_typing_context(message),
+        )
         if response is None:
             return
         response = clean_response(response)
@@ -193,3 +198,15 @@ class MessageHandler:
                     user_entry,
                     bot_entry,
                 )
+
+    @asynccontextmanager
+    async def _tool_typing_context(
+        self, message: discord.Message
+    ) -> AsyncIterator[None]:
+        """Show Discord typing status while slow LLM tools run."""
+        if not self.config["behavior"].get("typing_indicator", False):
+            yield
+            return
+
+        async with message.channel.typing():
+            yield

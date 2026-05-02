@@ -1,11 +1,14 @@
 import json
 import logging
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 
 from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APIStatusError
 
 from web_search import web_fetch, web_search
 
 logger = logging.getLogger(__name__)
+ToolActivityContext = Callable[[], AbstractAsyncContextManager[None]]
 
 WEB_SEARCH_TOOL = {
     "type": "function",
@@ -93,7 +96,11 @@ class LLMClient:
         )
         self.web_search_log_payloads = bool(web_search_config.get("log_payloads", False))
 
-    async def reply(self, conversation: list[dict]) -> str | None:
+    async def reply(
+        self,
+        conversation: list[dict],
+        tool_activity_context: ToolActivityContext | None = None,
+    ) -> str | None:
         """Send conversation history and return the response text.
 
         Returns None on any API error.
@@ -103,10 +110,17 @@ class LLMClient:
 
         messages = [{"role": "system", "content": self.system_prompt}] + conversation
 
-        return await self._chat(messages, allow_tools=True)
+        return await self._chat(
+            messages,
+            allow_tools=True,
+            tool_activity_context=tool_activity_context,
+        )
 
     async def _chat(
-        self, messages: list[dict], allow_tools: bool = False
+        self,
+        messages: list[dict],
+        allow_tools: bool = False,
+        tool_activity_context: ToolActivityContext | None = None,
     ) -> str | None:
         """Send messages to Chat Completions, optionally handling tool calls."""
         tools = (
@@ -157,7 +171,11 @@ class LLMClient:
 
                 messages.append(self._assistant_tool_call_message(message))
                 for tool_call in tool_calls:
-                    messages.append(await self._run_tool_call(tool_call))
+                    if tool_activity_context is None:
+                        messages.append(await self._run_tool_call(tool_call))
+                    else:
+                        async with tool_activity_context():
+                            messages.append(await self._run_tool_call(tool_call))
 
             logger.warning("Tool call limit reached, skipping reply")
             return None
