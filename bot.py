@@ -1,3 +1,4 @@
+import logging
 import traceback
 
 import discord
@@ -16,6 +17,15 @@ load_dotenv()
 with open("config.yaml", "r") as f:
     config = yaml.safe_load(f)
 
+log_config = config.get("logging", {})
+log_level_name = str(log_config.get("level", "INFO")).upper()
+log_level = getattr(logging, log_level_name, logging.INFO)
+logging.basicConfig(
+    level=log_level,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
 # Initialize bot
 bot = commands.Bot(
     command_prefix=config["behavior"]["command_prefix"],
@@ -31,12 +41,12 @@ picker = InterestingPicker(bot, llm, ctx_manager, config)
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    logger.info("Logged in as %s (ID: %s)", bot.user, bot.user.id)
     ctx_manager.set_bot_user(bot.user.id)
     if config["reply_modes"]["interesting"]["enabled"]:
         picker.start()
-        print("[interesting] Background picker started")
-    print("Ready.")
+        logger.info("[interesting] Background picker started")
+    logger.info("Ready.")
 
 
 @bot.event
@@ -51,6 +61,7 @@ async def on_message(message):
 
 @bot.event
 async def on_error(event, *args, **kwargs):
+    logger.error("Unhandled Discord event error in %s", event)
     traceback.print_exc()
 
 

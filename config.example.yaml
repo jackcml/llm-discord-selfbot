@@ -1,6 +1,9 @@
 discord:
   token: "your-user-token-here"
 
+logging:
+  level: INFO # use DEBUG for chat/tool round details
+
 llm:
   # Provider base URLs:
   #   Anthropic:  https://api.anthropic.com/v1/
@@ -20,6 +23,7 @@ llm:
     max_tool_rounds: 5 # max tool-call iterations before giving up
     fetch_max_chars: 12000 # default readable chars returned by web_fetch
     fetch_hard_max_chars: 100000 # max readable chars web_fetch may request for long logs/docs
+    log_payloads: false # DEBUG-log full tool JSON payloads, truncated to 10000 chars
   system_prompt: |
     You are a casual Discord user. Keep responses concise and conversational.
     Match the tone of the channel. Avoid long-winded replies.

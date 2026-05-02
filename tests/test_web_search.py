@@ -87,40 +87,93 @@ def test_web_search_serializes_search_errors(monkeypatch):
     assert payload["error"] == "TimeoutError: search took too long"
 
 
-def test_duckduckgo_html_parser_decodes_results(monkeypatch):
-    html = """
+def test_duckduckgo_parser_decodes_lite_results():
+    lite_results = """
     <html>
       <body>
-        <a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fstory%3Fx%3D1">
-          Example &amp; Story
+        <a class="result-link" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fstory">
+          Fallback Story
         </a>
-        <a class="result__snippet"> A compact
-          snippet with   extra whitespace. </a>
-        <a class="result__a" href="https://direct.example/result">Second result</a>
-        <div class="result__snippet">Another snippet.</div>
+        <td class="result-snippet">Fallback snippet.</td>
       </body>
     </html>
     """
-    captured_requests = []
+
+    results = web_search_module._parse_duckduckgo_results(lite_results, 5)
+
+    assert results == [
+        {
+            "title": "Fallback Story",
+            "url": "https://example.com/story",
+            "snippet": "Fallback snippet.",
+        }
+    ]
+
+
+def test_duckduckgo_search_uses_lite_endpoint(monkeypatch):
+    lite_results = """
+    <html>
+      <body>
+        <a class="result-link" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fstory">
+          Fallback Story
+        </a>
+        <td class="result-snippet">Fallback snippet.</td>
+      </body>
+    </html>
+    """
+    requested_urls = []
 
     def fake_urlopen(request, timeout):
-        captured_requests.append((request, timeout))
-        return _FakeResponse(html)
+        requested_urls.append(request.full_url)
+        return _FakeResponse(lite_results)
 
     monkeypatch.setattr(web_search_module.urllib.request, "urlopen", fake_urlopen)
 
-    results = web_search_module._search_duckduckgo_sync("example query", 1)
+    results = web_search_module._search_duckduckgo_sync("met gala sponsors", 5)
 
-    assert len(results) == 1
-    assert results[0] == {
-        "title": "Example & Story",
-        "url": "https://example.com/story?x=1",
-        "snippet": "A compact snippet with extra whitespace.",
+    assert requested_urls == [
+        "https://lite.duckduckgo.com/lite/?q=met+gala+sponsors",
+    ]
+    assert results == [
+        {
+            "title": "Fallback Story",
+            "url": "https://example.com/story",
+            "snippet": "Fallback snippet.",
+        }
+    ]
+
+
+def test_duckduckgo_search_reports_blocked_lite_page(monkeypatch):
+    blocked = "<html><head><title>DuckDuckGo</title></head><body></body></html>"
+
+    def fake_urlopen(request, timeout):
+        return _FakeResponse(blocked, status=202)
+
+    monkeypatch.setattr(web_search_module.urllib.request, "urlopen", fake_urlopen)
+
+    try:
+        web_search_module._search_duckduckgo_sync("met gala sponsors", 5)
+    except RuntimeError as e:
+        assert "DuckDuckGo lite returned HTTP 202 without search results" in str(e)
+    else:
+        raise AssertionError("expected blocked DuckDuckGo lite page to raise")
+
+
+def test_duckduckgo_lite_diagnostics_summarize_zero_result_pages():
+    diagnostics = web_search_module._html_search_diagnostics(
+        "<html><head><title>Blocked</title></head><body>captcha</body></html>",
+        202,
+    )
+
+    assert diagnostics == {
+        "status": 202,
+        "html_chars": 68,
+        "title": "Blocked",
+        "result_link_markers": 0,
+        "result_snippet_markers": 0,
+        "captcha_markers": 1,
+        "no_results_markers": 0,
     }
-    request, timeout = captured_requests[0]
-    assert timeout == 10
-    assert "q=example+query" in request.full_url
-    assert "llm-discord-selfbot" in request.headers["User-agent"]
 
 
 def test_web_fetch_rejects_empty_and_non_http_urls():

@@ -1,8 +1,11 @@
 import json
+import logging
 
 from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APIStatusError
 
 from web_search import web_fetch, web_search
+
+logger = logging.getLogger(__name__)
 
 WEB_SEARCH_TOOL = {
     "type": "function",
@@ -88,6 +91,7 @@ class LLMClient:
         self.web_fetch_hard_max_chars = max(
             self.web_fetch_max_chars, self.web_fetch_hard_max_chars
         )
+        self.web_search_log_payloads = bool(web_search_config.get("log_payloads", False))
 
     async def reply(self, conversation: list[dict]) -> str | None:
         """Send conversation history and return the response text.
@@ -117,7 +121,8 @@ class LLMClient:
         )
 
         try:
-            for _ in range(max(1, self.web_search_max_rounds + 1)):
+            max_rounds = max(1, self.web_search_max_rounds + 1)
+            for round_index in range(max_rounds):
                 kwargs = {
                     "model": self.model,
                     "max_tokens": self.max_tokens,
@@ -128,9 +133,24 @@ class LLMClient:
                     kwargs["tools"] = tools
                     kwargs["tool_choice"] = "auto"
 
+                logger.debug(
+                    "Starting chat completion round=%s/%s model=%s tools=%s messages=%s",
+                    round_index + 1,
+                    max_rounds,
+                    self.model,
+                    bool(tools),
+                    len(messages),
+                )
                 response = await self.client.chat.completions.create(**kwargs)
-                message = response.choices[0].message
+                choice = response.choices[0]
+                message = choice.message
                 tool_calls = getattr(message, "tool_calls", None)
+                logger.debug(
+                    "Chat completion returned finish_reason=%s content_chars=%s tool_calls=%s",
+                    getattr(choice, "finish_reason", None),
+                    len(message.content or ""),
+                    len(tool_calls or []),
+                )
 
                 if not tool_calls:
                     return message.content
@@ -139,16 +159,16 @@ class LLMClient:
                 for tool_call in tool_calls:
                     messages.append(await self._run_tool_call(tool_call))
 
-            print("[llm] Tool call limit reached, skipping reply")
+            logger.warning("Tool call limit reached, skipping reply")
             return None
         except RateLimitError:
-            print("[llm] Rate limited, skipping reply")
+            logger.warning("Rate limited, skipping reply")
             return None
         except APIConnectionError:
-            print("[llm] Connection error, skipping reply")
+            logger.warning("Connection error, skipping reply")
             return None
         except APIStatusError as e:
-            print(f"[llm] API error {e.status_code}: {e.message}")
+            logger.warning("API error %s: %s", e.status_code, e.message)
             return None
 
     def _assistant_tool_call_message(self, message) -> dict:
@@ -190,9 +210,15 @@ class LLMClient:
 
     async def _run_tool_call(self, tool_call) -> dict:
         name = tool_call.function.name
+        raw_arguments = tool_call.function.arguments or "{}"
         try:
-            args = json.loads(tool_call.function.arguments or "{}")
+            args = json.loads(raw_arguments)
         except json.JSONDecodeError:
+            logger.warning(
+                "Tool call %s had invalid JSON arguments: %r",
+                name,
+                raw_arguments[:500],
+            )
             args = {}
 
         if name == "web_search":
@@ -203,6 +229,13 @@ class LLMClient:
             except (TypeError, ValueError):
                 max_results = self.web_search_max_results
             max_results = min(max_results, self.web_search_max_results)
+            logger.info(
+                "Running web_search tool_call_id=%s query=%r max_results=%s requested=%r",
+                tool_call.id,
+                query,
+                max_results,
+                requested,
+            )
             content = await web_search(query, max_results=max_results)
         elif name == "web_fetch":
             url = str(args.get("url", ""))
@@ -212,9 +245,31 @@ class LLMClient:
             except (TypeError, ValueError):
                 max_chars = self.web_fetch_max_chars
             max_chars = max(500, min(max_chars, self.web_fetch_hard_max_chars))
+            logger.info(
+                "Running web_fetch tool_call_id=%s url=%r max_chars=%s requested=%r",
+                tool_call.id,
+                url,
+                max_chars,
+                requested,
+            )
             content = await web_fetch(url, max_chars=max_chars)
         else:
+            logger.warning("Unknown tool requested: %s", name)
             content = json.dumps({"error": f"unknown tool: {name}"})
+
+        logger.info(
+            "Tool result tool_call_id=%s name=%s summary=%s",
+            tool_call.id,
+            name,
+            self._tool_result_summary(content),
+        )
+        if getattr(self, "web_search_log_payloads", False):
+            logger.debug(
+                "Tool result payload tool_call_id=%s name=%s content=%s",
+                tool_call.id,
+                name,
+                content[:10000],
+            )
 
         return {
             "role": "tool",
@@ -222,6 +277,34 @@ class LLMClient:
             "name": name,
             "content": content,
         }
+
+    @staticmethod
+    def _tool_result_summary(content: str) -> dict:
+        summary = {"chars": len(content)}
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            summary["json"] = False
+            return summary
+
+        summary["json"] = True
+        if "error" in payload:
+            summary["error"] = payload["error"]
+        if "query" in payload:
+            summary["query"] = payload["query"]
+        if "results" in payload:
+            summary["results"] = len(payload.get("results") or [])
+        if "url" in payload:
+            summary["url"] = payload["url"]
+        if "final_url" in payload:
+            summary["final_url"] = payload["final_url"]
+        if "status" in payload:
+            summary["status"] = payload["status"]
+        if "text" in payload:
+            summary["text_chars"] = len(payload.get("text") or "")
+        if "truncated" in payload:
+            summary["truncated"] = payload["truncated"]
+        return summary
 
     async def pick_interesting(self, messages_summary: str) -> str | None:
         """Ask the LLM to pick the most interesting message to reply to.
@@ -247,5 +330,5 @@ class LLMClient:
         try:
             return await self._chat(messages, allow_tools=False)
         except Exception as e:
-            print(f"[llm] Error in pick_interesting: {e}")
+            logger.warning("Error in pick_interesting: %s", e)
             return None
