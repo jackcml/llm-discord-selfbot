@@ -98,6 +98,13 @@ class LLMClient:
         self.web_search_log_payloads = bool(web_search_config.get("log_payloads", False))
         self.brave_api_key = web_search_config.get("brave_api_key") or os.environ.get("BRAVE_API_KEY")
 
+    def get_system_prompt(self) -> str:
+        """Returns the base system prompt dynamically appended with the current date, time, and timezone."""
+        from datetime import datetime
+        now = datetime.now().astimezone()
+        time_str = now.strftime("%Y-%m-%d %H:%M:%S %Z")
+        return f"{self.system_prompt}\n\nCurrent Date and Time: {time_str}"
+
     async def reply(
         self,
         conversation: list[dict],
@@ -110,7 +117,7 @@ class LLMClient:
         if not conversation:
             return None
 
-        messages = [{"role": "system", "content": self.system_prompt}] + conversation
+        messages = [{"role": "system", "content": self.get_system_prompt()}] + conversation
 
         return await self._chat(
             messages,
@@ -335,7 +342,7 @@ class LLMClient:
         or None on error.
         """
         messages = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": self.get_system_prompt()},
             {
                 "role": "user",
                 "content": (
