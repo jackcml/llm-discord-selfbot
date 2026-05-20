@@ -1,13 +1,13 @@
 import asyncio
 import json
 import logging
+import os
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
+import yaml
 
 logger = logging.getLogger(__name__)
-
-DUCKDUCKGO_LITE_ENDPOINT = "https://lite.duckduckgo.com/lite/"
 
 
 class _ReadableHTMLParser(HTMLParser):
@@ -47,145 +47,39 @@ class _ReadableHTMLParser(HTMLParser):
         return self._clean_text(" ".join(self.text))
 
 
-class _DuckDuckGoHTMLParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.results = []
-        self._current = None
-        self._capture = None
-        self._chunks = []
-
-    def handle_starttag(self, tag, attrs):
-        attrs = dict(attrs)
-        classes = set(attrs.get("class", "").split())
-
-        if tag == "a" and "result-link" in classes:
-            self._finish_current()
-            self._current = {
-                "title": "",
-                "url": self._clean_url(attrs.get("href", "")),
-            }
-            self._capture = "title"
-            self._chunks = []
-            return
-
-        if self._current is not None and "result-snippet" in classes:
-            self._capture = "snippet"
-            self._chunks = []
-
-    def handle_data(self, data):
-        if self._capture:
-            self._chunks.append(data)
-
-    def handle_endtag(self, tag):
-        if self._capture == "title" and tag == "a":
-            self._current["title"] = self._clean_text("".join(self._chunks))
-            self._capture = None
-            self._chunks = []
-            return
-
-        if self._capture == "snippet" and tag in {"a", "div", "td", "span"}:
-            self._current["snippet"] = self._clean_text("".join(self._chunks))
-            self._finish_current()
-
-    def close(self):
-        self._finish_current()
-        super().close()
-
-    def _finish_current(self):
-        if self._current is None:
-            return
-        if self._current.get("title") and self._current.get("url"):
-            self._current.setdefault("snippet", "")
-            self.results.append(self._current)
-        self._current = None
-        self._capture = None
-        self._chunks = []
-
-    @staticmethod
-    def _clean_text(text: str) -> str:
-        return " ".join(text.split())
-
-    @staticmethod
-    def _clean_url(url: str) -> str:
-        if url.startswith("//"):
-            url = f"https:{url}"
-        parsed = urllib.parse.urlparse(url)
-        query = urllib.parse.parse_qs(parsed.query)
-        if "uddg" in query:
-            return query["uddg"][0]
-        return url
+BRAVE_SEARCH_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 
 
-def _search_duckduckgo_sync(query: str, max_results: int) -> list[dict]:
-    params = urllib.parse.urlencode({"q": query})
-    html, status = _fetch_duckduckgo_html(DUCKDUCKGO_LITE_ENDPOINT, params)
-    results = _parse_duckduckgo_results(html, max_results)
-    logger.debug(
-        "DuckDuckGo lite search parsed status=%s html_chars=%s results=%s query=%r",
-        status,
-        len(html),
-        len(results),
-        query,
-    )
-    if not results:
-        diagnostics = _html_search_diagnostics(html, status)
-        logger.warning(
-            "DuckDuckGo lite search returned zero parsed results: %s",
-            diagnostics,
-        )
-        if status == 202:
-            raise RuntimeError(
-                "DuckDuckGo lite returned HTTP 202 without search results; "
-                f"{diagnostics}"
-            )
+def _search_brave_sync(query: str, max_results: int, api_key: str) -> list[dict]:
+    params = urllib.parse.urlencode({"q": query, "count": max_results})
+    url = f"{BRAVE_SEARCH_ENDPOINT}?{params}"
 
-    return results
-
-
-def _fetch_duckduckgo_html(endpoint_url: str, params: str) -> tuple[str, int | None]:
     request = urllib.request.Request(
-        f"{endpoint_url}?{params}",
+        url,
         headers={
-            "User-Agent": (
-                "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) "
-                "Gecko/20100101 Firefox/125.0"
-            )
+            "X-Subscription-Token": api_key,
+            "Accept": "application/json",
+            "User-Agent": "llm-discord-selfbot/1.0",
         },
     )
 
     with urllib.request.urlopen(request, timeout=10) as response:
-        html = response.read().decode("utf-8", errors="replace")
-        status = getattr(response, "status", None)
-    return html, status
+        body = response.read()
 
+    data = json.loads(body.decode("utf-8", errors="replace"))
+    results = []
+    web_data = data.get("web", {})
+    raw_results = web_data.get("results", [])
 
-def _parse_duckduckgo_results(html: str, max_results: int) -> list[dict]:
-    parser = _DuckDuckGoHTMLParser()
-    parser.feed(html)
-    parser.close()
-    return parser.results[:max_results]
+    for r in raw_results:
+        results.append({
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": r.get("description", ""),
+        })
 
+    return results[:max_results]
 
-def _html_search_diagnostics(html: str, status: int | None) -> dict:
-    lower_html = html.lower()
-    title = ""
-    title_start = lower_html.find("<title")
-    if title_start != -1:
-        title_text_start = lower_html.find(">", title_start)
-        title_end = lower_html.find("</title>", title_text_start)
-        if title_text_start != -1 and title_end != -1:
-            title = " ".join(html[title_text_start + 1 : title_end].split())
-
-    return {
-        "status": status,
-        "html_chars": len(html),
-        "title": title[:200],
-        "result_link_markers": lower_html.count("result-link"),
-        "result_snippet_markers": lower_html.count("result-snippet"),
-        "captcha_markers": lower_html.count("captcha"),
-        "no_results_markers": lower_html.count("no results"),
-    }
 
 
 def _valid_fetch_url(url: str) -> bool:
@@ -249,7 +143,9 @@ def _fetch_url_sync(url: str, max_chars: int) -> dict:
     }
 
 
-async def web_search(query: str, max_results: int = 5) -> str:
+async def web_search(
+    query: str, max_results: int = 5, api_key: str | None = None
+) -> str:
     """Run a web search and return compact JSON for an LLM tool response."""
     query = query.strip()
     if not query:
@@ -258,8 +154,33 @@ async def web_search(query: str, max_results: int = 5) -> str:
 
     max_results = max(1, min(max_results, 10))
     logger.info("web_search start query=%r max_results=%s", query, max_results)
+
+    if not api_key:
+        api_key = os.environ.get("BRAVE_API_KEY")
+
+    if not api_key:
+        try:
+            if os.path.exists("config.yaml"):
+                with open("config.yaml", "r") as f:
+                    config = yaml.safe_load(f)
+                    api_key = (
+                        config.get("llm", {})
+                        .get("web_search", {})
+                        .get("brave_api_key")
+                    )
+        except Exception:
+            pass
+
     try:
-        search_task = asyncio.to_thread(_search_duckduckgo_sync, query, max_results)
+        if not api_key:
+            raise ValueError(
+                "Brave API key is not configured. Please set the brave_api_key in config.yaml "
+                "or the BRAVE_API_KEY environment variable."
+            )
+
+        search_task = asyncio.to_thread(
+            _search_brave_sync, query, max_results, api_key
+        )
         results = await asyncio.wait_for(search_task, timeout=12)
         logger.info("web_search done query=%r results=%s", query, len(results))
         return json.dumps({"query": query, "results": results}, ensure_ascii=True)

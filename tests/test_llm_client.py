@@ -185,3 +185,31 @@ def test_chat_wraps_tool_calls_in_activity_context(monkeypatch):
 
     assert result == "done"
     assert events == ["enter", "tool", "exit"]
+
+
+def test_run_tool_call_dispatches_web_search(monkeypatch):
+    client = object.__new__(LLMClient)
+    client.web_search_max_results = 5
+    client.brave_api_key = "test-api-key"
+    calls = []
+
+    async def fake_web_search(query, max_results=5, api_key=None):
+        calls.append((query, max_results, api_key))
+        return '{"results": []}'
+
+    monkeypatch.setattr(llm_client_module, "web_search", fake_web_search)
+
+    payload = asyncio.run(
+        client._run_tool_call(
+            _tool_call("web_search", '{"query": "deepseek", "max_results": 3}')
+        )
+    )
+
+    assert calls == [("deepseek", 3, "test-api-key")]
+    assert payload == {
+        "role": "tool",
+        "tool_call_id": "call_123",
+        "name": "web_search",
+        "content": '{"results": []}',
+    }
+

@@ -38,10 +38,10 @@ class _FakeResponse:
 
 
 def test_empty_query_returns_error_without_searching(monkeypatch):
-    def fake_search(query, max_results):
+    def fake_search(query, max_results, api_key):
         raise AssertionError("search should not be called for an empty query")
 
-    monkeypatch.setattr(web_search_module, "_search_duckduckgo_sync", fake_search)
+    monkeypatch.setattr(web_search_module, "_search_brave_sync", fake_search)
 
     payload = json.loads(asyncio.run(web_search_module.web_search("   ")))
 
@@ -51,20 +51,20 @@ def test_empty_query_returns_error_without_searching(monkeypatch):
 def test_web_search_clamps_max_results_and_returns_json(monkeypatch):
     calls = []
 
-    def fake_search(query, max_results):
-        calls.append((query, max_results))
+    def fake_search(query, max_results, api_key):
+        calls.append((query, max_results, api_key))
         return [{"title": "Result", "url": "https://example.com", "snippet": "Text"}]
 
-    monkeypatch.setattr(web_search_module, "_search_duckduckgo_sync", fake_search)
+    monkeypatch.setattr(web_search_module, "_search_brave_sync", fake_search)
     monkeypatch.setattr(web_search_module.asyncio, "to_thread", _run_without_thread)
 
     payload = json.loads(
         asyncio.run(
-            web_search_module.web_search("  latest python release  ", max_results=99)
+            web_search_module.web_search("  latest python release  ", max_results=99, api_key="test-key")
         )
     )
 
-    assert calls == [("latest python release", 10)]
+    assert calls == [("latest python release", 10, "test-key")]
     assert payload["query"] == "latest python release"
     assert payload["results"] == [
         {"title": "Result", "url": "https://example.com", "snippet": "Text"}
@@ -72,14 +72,14 @@ def test_web_search_clamps_max_results_and_returns_json(monkeypatch):
 
 
 def test_web_search_serializes_search_errors(monkeypatch):
-    def fake_search(query, max_results):
+    def fake_search(query, max_results, api_key):
         raise TimeoutError("search took too long")
 
-    monkeypatch.setattr(web_search_module, "_search_duckduckgo_sync", fake_search)
+    monkeypatch.setattr(web_search_module, "_search_brave_sync", fake_search)
     monkeypatch.setattr(web_search_module.asyncio, "to_thread", _run_without_thread)
 
     payload = json.loads(
-        asyncio.run(web_search_module.web_search("news", max_results=3))
+        asyncio.run(web_search_module.web_search("news", max_results=3, api_key="test-key"))
     )
 
     assert payload["query"] == "news"
@@ -87,93 +87,55 @@ def test_web_search_serializes_search_errors(monkeypatch):
     assert payload["error"] == "TimeoutError: search took too long"
 
 
-def test_duckduckgo_parser_decodes_lite_results():
-    lite_results = """
-    <html>
-      <body>
-        <a class="result-link" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fstory">
-          Fallback Story
-        </a>
-        <td class="result-snippet">Fallback snippet.</td>
-      </body>
-    </html>
-    """
+def test_web_search_fails_without_api_key(monkeypatch):
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    monkeypatch.setattr(web_search_module.os.path, "exists", lambda x: False)
 
-    results = web_search_module._parse_duckduckgo_results(lite_results, 5)
+    payload = json.loads(asyncio.run(web_search_module.web_search("python")))
 
-    assert results == [
-        {
-            "title": "Fallback Story",
-            "url": "https://example.com/story",
-            "snippet": "Fallback snippet.",
-        }
-    ]
+    assert payload["query"] == "python"
+    assert payload["results"] == []
+    assert "Brave API key is not configured" in payload["error"]
 
 
-def test_duckduckgo_search_uses_lite_endpoint(monkeypatch):
-    lite_results = """
-    <html>
-      <body>
-        <a class="result-link" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fstory">
-          Fallback Story
-        </a>
-        <td class="result-snippet">Fallback snippet.</td>
-      </body>
-    </html>
-    """
+def test_brave_search_sync_builds_request_and_parses_json(monkeypatch):
     requested_urls = []
+    headers_passed = {}
+
+    brave_response_json = {
+        "web": {
+            "results": [
+                {
+                    "title": "Brave Search API",
+                    "url": "https://brave.com/search-api/",
+                    "description": "Clean, independent search results.",
+                }
+            ]
+        }
+    }
 
     def fake_urlopen(request, timeout):
         requested_urls.append(request.full_url)
-        return _FakeResponse(lite_results)
+        headers_passed.update(request.headers)
+        return _FakeResponse(json.dumps(brave_response_json))
 
     monkeypatch.setattr(web_search_module.urllib.request, "urlopen", fake_urlopen)
 
-    results = web_search_module._search_duckduckgo_sync("met gala sponsors", 5)
+    results = web_search_module._search_brave_sync("brave search api", 5, "test-api-key")
 
     assert requested_urls == [
-        "https://lite.duckduckgo.com/lite/?q=met+gala+sponsors",
+        "https://api.search.brave.com/res/v1/web/search?q=brave+search+api&count=5"
     ]
+    headers_lower = {k.lower(): v for k, v in headers_passed.items()}
+    assert headers_lower["x-subscription-token"] == "test-api-key"
+    assert headers_lower["accept"] == "application/json"
     assert results == [
         {
-            "title": "Fallback Story",
-            "url": "https://example.com/story",
-            "snippet": "Fallback snippet.",
+            "title": "Brave Search API",
+            "url": "https://brave.com/search-api/",
+            "snippet": "Clean, independent search results.",
         }
     ]
-
-
-def test_duckduckgo_search_reports_blocked_lite_page(monkeypatch):
-    blocked = "<html><head><title>DuckDuckGo</title></head><body></body></html>"
-
-    def fake_urlopen(request, timeout):
-        return _FakeResponse(blocked, status=202)
-
-    monkeypatch.setattr(web_search_module.urllib.request, "urlopen", fake_urlopen)
-
-    try:
-        web_search_module._search_duckduckgo_sync("met gala sponsors", 5)
-    except RuntimeError as e:
-        assert "DuckDuckGo lite returned HTTP 202 without search results" in str(e)
-    else:
-        raise AssertionError("expected blocked DuckDuckGo lite page to raise")
-
-
-def test_duckduckgo_lite_diagnostics_summarize_zero_result_pages():
-    diagnostics = web_search_module._html_search_diagnostics(
-        "<html><head><title>Blocked</title></head><body>captcha</body></html>",
-        202,
-    )
-
-    assert diagnostics == {
-        "status": 202,
-        "html_chars": 68,
-        "title": "Blocked",
-        "result_link_markers": 0,
-        "result_snippet_markers": 0,
-        "captcha_markers": 1,
-        "no_results_markers": 0,
-    }
 
 
 def test_web_fetch_rejects_empty_and_non_http_urls():

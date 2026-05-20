@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 
@@ -95,6 +96,7 @@ class LLMClient:
             self.web_fetch_max_chars, self.web_fetch_hard_max_chars
         )
         self.web_search_log_payloads = bool(web_search_config.get("log_payloads", False))
+        self.brave_api_key = web_search_config.get("brave_api_key") or os.environ.get("BRAVE_API_KEY")
 
     async def reply(
         self,
@@ -254,7 +256,9 @@ class LLMClient:
                 max_results,
                 requested,
             )
-            content = await web_search(query, max_results=max_results)
+            content = await web_search(
+                query, max_results=max_results, api_key=self.brave_api_key
+            )
         elif name == "web_fetch":
             url = str(args.get("url", ""))
             requested = args.get("max_chars", self.web_fetch_max_chars)
