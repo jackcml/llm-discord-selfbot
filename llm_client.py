@@ -11,6 +11,12 @@ from web_search import web_fetch, web_search
 logger = logging.getLogger(__name__)
 ToolActivityContext = Callable[[], AbstractAsyncContextManager[None]]
 
+TOOL_LIMIT_MESSAGE = (
+    "You have reached the tool-call limit. Do not call any more tools. "
+    "Provide your best final response using the information gathered so far. "
+    "Be transparent about any uncertainty or missing information."
+)
+
 WEB_SEARCH_TOOL = {
     "type": "function",
     "function": {
@@ -144,24 +150,33 @@ class LLMClient:
         )
 
         try:
-            max_rounds = max(1, self.web_search_max_rounds + 1)
-            for round_index in range(max_rounds):
+            tool_rounds = 0
+            final_response_requested = False
+            while True:
+                if tools and tool_rounds >= max(0, self.web_search_max_rounds):
+                    logger.warning(
+                        "Tool call limit reached after %s round(s); "
+                        "requesting final response",
+                        tool_rounds,
+                    )
+                    messages.append({"role": "user", "content": TOOL_LIMIT_MESSAGE})
+                    final_response_requested = True
+
                 kwargs = {
                     "model": self.model,
                     "max_tokens": self.max_tokens,
                     "temperature": self.temperature,
                     "messages": messages,
                 }
-                if tools:
+                if tools and not final_response_requested:
                     kwargs["tools"] = tools
                     kwargs["tool_choice"] = "auto"
 
                 logger.debug(
-                    "Starting chat completion round=%s/%s model=%s tools=%s messages=%s",
-                    round_index + 1,
-                    max_rounds,
+                    "Starting chat completion tool_round=%s model=%s tools=%s messages=%s",
+                    tool_rounds + 1,
                     self.model,
-                    bool(tools),
+                    "tools" in kwargs,
                     len(messages),
                 )
                 response = await self.client.chat.completions.create(**kwargs)
@@ -178,6 +193,13 @@ class LLMClient:
                 if not tool_calls:
                     return message.content
 
+                if not tools or final_response_requested:
+                    logger.warning(
+                        "Model returned tool calls while tools were disabled; "
+                        "returning available response content"
+                    )
+                    return message.content
+
                 messages.append(self._assistant_tool_call_message(message))
                 for tool_call in tool_calls:
                     if tool_activity_context is None:
@@ -186,8 +208,7 @@ class LLMClient:
                         async with tool_activity_context():
                             messages.append(await self._run_tool_call(tool_call))
 
-            logger.warning("Tool call limit reached, skipping reply")
-            return None
+                tool_rounds += 1
         except RateLimitError:
             logger.warning("Rate limited, skipping reply")
             return None

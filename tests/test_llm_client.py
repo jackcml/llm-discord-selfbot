@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import llm_client as llm_client_module
-from llm_client import LLMClient, _web_fetch_tool
+from llm_client import LLMClient, TOOL_LIMIT_MESSAGE, _web_fetch_tool
 
 
 def _tool_call(name="web_search", arguments='{"query": "deepseek"}'):
@@ -148,13 +148,14 @@ def test_chat_wraps_tool_calls_in_activity_context(monkeypatch):
     class FakeCompletions:
         def __init__(self):
             self.responses = [first_response, final_response]
+            self.requests = []
 
         async def create(self, **kwargs):
+            self.requests.append(kwargs)
             return self.responses.pop(0)
 
-    client.client = SimpleNamespace(
-        chat=SimpleNamespace(completions=FakeCompletions())
-    )
+    completions = FakeCompletions()
+    client.client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
 
     @asynccontextmanager
     async def activity_context():
@@ -185,6 +186,81 @@ def test_chat_wraps_tool_calls_in_activity_context(monkeypatch):
 
     assert result == "done"
     assert events == ["enter", "tool", "exit"]
+    assert "tools" in completions.requests[0]
+    assert "tool_choice" in completions.requests[0]
+    assert "tools" not in completions.requests[1]
+    assert "tool_choice" not in completions.requests[1]
+    assert completions.requests[1]["messages"][-1] == {
+        "role": "user",
+        "content": TOOL_LIMIT_MESSAGE,
+    }
+
+
+def test_chat_requests_final_response_after_multiple_tool_rounds(monkeypatch):
+    client = object.__new__(LLMClient)
+    client.model = "test-model"
+    client.max_tokens = 100
+    client.temperature = 1.0
+    client.web_search_enabled = True
+    client.web_search_max_rounds = 2
+    client.web_fetch_max_chars = 12000
+    client.web_fetch_hard_max_chars = 100000
+    client.web_search_log_payloads = False
+
+    tool_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="tool_calls",
+                message=SimpleNamespace(content="", tool_calls=[_tool_call()]),
+            )
+        ]
+    )
+    final_response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                finish_reason="stop",
+                message=SimpleNamespace(
+                    content="best answer from gathered results",
+                    tool_calls=None,
+                ),
+            )
+        ]
+    )
+
+    class FakeCompletions:
+        def __init__(self):
+            self.responses = [tool_response, tool_response, final_response]
+            self.requests = []
+
+        async def create(self, **kwargs):
+            self.requests.append(kwargs)
+            return self.responses.pop(0)
+
+    completions = FakeCompletions()
+    client.client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    tool_calls_run = []
+
+    async def fake_run_tool_call(tool_call):
+        tool_calls_run.append(tool_call)
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call.id,
+            "name": tool_call.function.name,
+            "content": '{"results": []}',
+        }
+
+    monkeypatch.setattr(client, "_run_tool_call", fake_run_tool_call)
+
+    result = asyncio.run(
+        client._chat([{"role": "user", "content": "research this"}], allow_tools=True)
+    )
+
+    assert result == "best answer from gathered results"
+    assert len(tool_calls_run) == 2
+    assert len(completions.requests) == 3
+    assert all("tools" in request for request in completions.requests[:2])
+    assert "tools" not in completions.requests[2]
+    assert completions.requests[2]["messages"][-1]["content"] == TOOL_LIMIT_MESSAGE
 
 
 def test_run_tool_call_dispatches_web_search(monkeypatch):
@@ -212,4 +288,3 @@ def test_run_tool_call_dispatches_web_search(monkeypatch):
         "name": "web_search",
         "content": '{"results": []}',
     }
-
