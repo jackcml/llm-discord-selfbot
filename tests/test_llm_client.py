@@ -3,7 +3,12 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import llm_client as llm_client_module
-from llm_client import LLMClient, TOOL_LIMIT_MESSAGE, _web_fetch_tool
+from llm_client import (
+    DISCORD_REPLY_INSTRUCTION,
+    LLMClient,
+    TOOL_LIMIT_MESSAGE,
+    _web_fetch_tool,
+)
 
 
 def _tool_call(name="web_search", arguments='{"query": "deepseek"}'):
@@ -288,3 +293,35 @@ def test_run_tool_call_dispatches_web_search(monkeypatch):
         "name": "web_search",
         "content": '{"results": []}',
     }
+
+
+def test_reply_adds_discord_context_contract_to_system_prompt(monkeypatch):
+    client = object.__new__(LLMClient)
+    conversation = [
+        {"role": "user", "name": "discord_context", "content": "old chat"},
+        {"role": "user", "name": "discord_target", "content": "new message"},
+    ]
+    requests = []
+
+    monkeypatch.setattr(client, "get_system_prompt", lambda: "base prompt")
+
+    async def fake_chat(messages, allow_tools=False, tool_activity_context=None):
+        requests.append((messages, allow_tools, tool_activity_context))
+        return "reply"
+
+    monkeypatch.setattr(client, "_chat", fake_chat)
+    activity_context = object()
+
+    result = asyncio.run(
+        client.reply(conversation, tool_activity_context=activity_context)
+    )
+
+    assert result == "reply"
+    messages, allow_tools, passed_activity_context = requests[0]
+    assert messages[0] == {
+        "role": "system",
+        "content": f"base prompt\n\n{DISCORD_REPLY_INSTRUCTION}",
+    }
+    assert messages[1:] == conversation
+    assert allow_tools is True
+    assert passed_activity_context is activity_context

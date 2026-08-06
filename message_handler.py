@@ -121,13 +121,13 @@ class MessageHandler:
         """Generate a response and send it."""
         is_dm = isinstance(message.channel, (discord.DMChannel, discord.GroupChannel))
 
-        # In DMs, no need for per-user conversation tracking — just use channel context
-        # Scope context up to this message so Claude only sees what came before,
-        # not later messages (which would cause it to address multiple conversations)
+        # In DMs, no need for per-user conversation tracking — just use channel context.
+        # The trigger ID both cuts off later chat and identifies the one message to answer;
+        # everything before it is explicitly framed as background by ContextManager.
         conversation = self.ctx.get_conversation(
             message.channel.id,
+            target_message_id=message.id,
             target_user_id=None if is_dm else message.author.id,
-            up_to_message_id=message.id,
             vision_enabled=self.config["llm"].get("vision", False),
         )
         if not conversation:

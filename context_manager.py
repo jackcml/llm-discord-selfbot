@@ -5,6 +5,13 @@ import discord
 
 from utils import clean_message_content, extract_image_urls
 
+CONTEXT_MESSAGE_NAME = "discord_context"
+TARGET_MESSAGE_NAME = "discord_target"
+CONTEXT_OPEN_TAG = "<recent_discord_context>"
+CONTEXT_CLOSE_TAG = "</recent_discord_context>"
+TARGET_OPEN_TAG = "<discord_message_to_reply_to>"
+TARGET_CLOSE_TAG = "</discord_message_to_reply_to>"
+
 
 class ContextManager:
     def __init__(self, context_config: dict):
@@ -97,115 +104,129 @@ class ContextManager:
             conv.append(user_entry)
         conv.append(bot_entry)
 
+    @staticmethod
+    def _format_entry(entry: dict) -> str:
+        """Format one buffered Discord message for a labelled transcript block."""
+        author = entry["author"]
+        if entry["is_self"]:
+            author = f"{author} (you)"
+        content = entry["content"]
+        return f"{author}: {content}" if content else f"{author}:"
+
+    def _build_message_block(
+        self,
+        entries: list[dict],
+        open_tag: str,
+        close_tag: str,
+        vision_enabled: bool,
+    ) -> str | list[dict[str, Any]]:
+        """Build a labelled text or multimodal block from Discord entries."""
+        has_images = vision_enabled and any(e.get("images") for e in entries)
+        if not has_images:
+            lines = [open_tag]
+            lines.extend(self._format_entry(entry) for entry in entries)
+            lines.append(close_tag)
+            return "\n".join(lines)
+
+        parts: list[dict[str, Any]] = []
+        pending_lines = [open_tag]
+        for entry in entries:
+            pending_lines.append(self._format_entry(entry))
+            images = entry.get("images", [])
+            if images:
+                parts.append({"type": "text", "text": "\n".join(pending_lines)})
+                pending_lines = []
+                for image in images:
+                    parts.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image["url"]},
+                        }
+                    )
+
+        pending_lines.append(close_tag)
+        parts.append({"type": "text", "text": "\n".join(pending_lines)})
+        return parts
+
     def get_conversation(
         self,
         channel_id: int,
+        target_message_id: int,
         target_user_id: int | None = None,
-        up_to_message_id: int | None = None,
         vision_enabled: bool = False,
     ) -> list[dict]:
-        """Convert context into OpenAI-compatible messages format.
+        """Build background context plus the one Discord message to answer.
 
-        If target_user_id is provided, merges:
-          1. The stored conversation history with that user (so the LLM remembers
-             past exchanges even if they've scrolled off the channel buffer)
-          2. Recent channel messages for general awareness
+        The exact ``target_message_id`` is emitted alone in a final, named user
+        message. All earlier channel and per-user conversation entries are emitted
+        in a separate, labelled context message. This prevents ambient chat or old
+        requests from being mistaken for additional messages the bot should answer.
 
-        If up_to_message_id is provided, only includes messages up to and
-        including that message ID. This prevents the LLM from seeing messages
-        that arrived after the trigger and trying to address them all.
+        Context and target content remain user-role data so untrusted Discord text is
+        not promoted to system instructions and vision-capable APIs can receive image
+        parts. ``LLMClient.reply`` supplies the system-level handling contract.
 
-        If vision_enabled is True and entries have images, emits multi-part
-        content arrays with image_url blocks.
-
-        Messages are deduped by ID and sorted chronologically.
+        Entries are deduplicated by ID, sorted chronologically, and truncated at the
+        target. If the exact target is unavailable, no request is sent to the model.
         """
-        # Collect entries from channel buffer
         buf = self.buffers.get(channel_id)
-        channel_entries = list(buf) if buf else []
-
-        # Truncate to only messages up to the trigger message
-        if up_to_message_id is not None:
-            channel_entries = [
-                e for e in channel_entries if e["id"] <= up_to_message_id
-            ]
+        channel_entries = [
+            entry
+            for entry in (list(buf) if buf else [])
+            if entry["id"] <= target_message_id
+        ]
 
         if target_user_id is not None:
-            # Merge in conversation-specific history
-            key = (channel_id, target_user_id)
-            conv = self.conversations.get(key)
+            conv = self.conversations.get((channel_id, target_user_id))
             if conv:
-                conv_entries = list(conv)
-                # Also truncate conversation history to the trigger
-                if up_to_message_id is not None:
-                    conv_entries = [
-                        e for e in conv_entries if e["id"] <= up_to_message_id
-                    ]
-                # Dedupe by message ID
-                seen_ids = {e["id"] for e in channel_entries}
-                for entry in conv_entries:
-                    if entry["id"] not in seen_ids:
+                seen_ids = {entry["id"] for entry in channel_entries}
+                for entry in conv:
+                    if entry["id"] <= target_message_id and entry["id"] not in seen_ids:
                         channel_entries.append(entry)
-                # Sort by message ID (snowflake IDs are chronological)
-                channel_entries.sort(key=lambda e: e["id"])
+                        seen_ids.add(entry["id"])
 
-        if not channel_entries:
+        channel_entries.sort(key=lambda entry: entry["id"])
+        target_entry = next(
+            (
+                entry
+                for entry in channel_entries
+                if entry["id"] == target_message_id and not entry["is_self"]
+            ),
+            None,
+        )
+        if target_entry is None:
             return []
 
-        # Convert to OpenAI-compatible format
-        messages: list[dict[str, Any]] = []
-        for entry in channel_entries:
-            if entry["is_self"]:
-                role = "assistant"
-                text = entry["content"]
-            else:
-                role = "user"
-                text = (
-                    f"{entry['author']}: {entry['content']}"
-                    if entry["content"]
-                    else f"{entry['author']}:"
-                )
+        context_entries = [
+            entry for entry in channel_entries if entry["id"] != target_message_id
+        ]
+        messages: list[dict] = []
+        if context_entries:
+            messages.append(
+                {
+                    "role": "user",
+                    "name": CONTEXT_MESSAGE_NAME,
+                    "content": self._build_message_block(
+                        context_entries,
+                        CONTEXT_OPEN_TAG,
+                        CONTEXT_CLOSE_TAG,
+                        vision_enabled,
+                    ),
+                }
+            )
 
-            images = entry.get("images", [])
-
-            # Build content: multi-part if vision + images, plain string otherwise
-            if vision_enabled and images:
-                content = [{"type": "text", "text": text}]
-                for img in images:
-                    content.append(
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": img["url"]},
-                        }
-                    )
-            else:
-                content = text
-
-            # Merge with previous if same role
-            if messages and messages[-1]["role"] == role:
-                prev_content = messages[-1]["content"]
-                if isinstance(prev_content, list):
-                    # Previous is already multi-part — append text + images
-                    if isinstance(content, list):
-                        prev_content.extend(content)
-                    else:
-                        prev_content.append({"type": "text", "text": content})
-                else:
-                    # Previous is a plain string
-                    if isinstance(content, list):
-                        # Upgrade previous to multi-part, then append new parts
-                        messages[-1]["content"] = [
-                            {"type": "text", "text": prev_content}
-                        ] + content
-                    else:
-                        messages[-1]["content"] = f"{prev_content}\n{content}"
-            else:
-                messages.append({"role": role, "content": content})
-
-        # API requires the first message to be "user" role
-        if messages and messages[0]["role"] == "assistant":
-            messages = messages[1:]
-
+        messages.append(
+            {
+                "role": "user",
+                "name": TARGET_MESSAGE_NAME,
+                "content": self._build_message_block(
+                    [target_entry],
+                    TARGET_OPEN_TAG,
+                    TARGET_CLOSE_TAG,
+                    vision_enabled,
+                ),
+            }
+        )
         return messages
 
     def get_recent_summary(self, channel_id: int, limit: int = 50) -> str:

@@ -12,7 +12,7 @@ A Discord selfbot that interfaces with any OpenAI-compatible LLM API to automati
 - **DM support**: always replies in 1-on-1 DMs; mention-only in group DMs (both independently toggleable)
 - **Vision support**: understands images when using a vision-capable model
 - **Web search tool**: opt-in Chat Completions function tool for current information
-- **Conversation memory**: per-user conversation tracking that persists through channel noise
+- **Conversation memory**: per-user history plus recent channel context, explicitly separated from the one Discord message the model should answer
 - **Provider-agnostic**: works with any OpenAI-compatible API (Anthropic, xAI/Grok, OpenAI, OpenRouter, etc.)
 - **Human-like typing delay**: configurable simulated typing indicator
 - **Runtime commands**: adjust settings on the fly via Discord messages
