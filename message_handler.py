@@ -74,6 +74,20 @@ class MessageHandler:
         """
         return any(int(x) == target_id for x in id_list)
 
+    @staticmethod
+    def _role_ids_for_guild(message: discord.Message, mention_config: dict) -> list:
+        """Return a guild-specific role rule, falling back to the global rule."""
+        guild = getattr(message, "guild", None)
+        role_ids_by_guild = mention_config.get("role_ids_by_guild", {})
+        if guild is not None:
+            # YAML mapping keys may be quoted strings or unquoted integers.
+            if guild.id in role_ids_by_guild:
+                return role_ids_by_guild[guild.id]
+            guild_id = str(guild.id)
+            if guild_id in role_ids_by_guild:
+                return role_ids_by_guild[guild_id]
+        return mention_config.get("role_ids", [])
+
     def _is_mentioned(self, message: discord.Message) -> bool:
         """Check if the bot user is mentioned in the message."""
         mc = self.config["reply_modes"]["mention"]
@@ -88,6 +102,14 @@ class MessageHandler:
         # User filter: empty list = all users
         allowed_users = mc.get("user_ids", [])
         if allowed_users and not self._id_in_list(message.author.id, allowed_users):
+            return False
+        # Guild-specific rules override the global role filter, including with [].
+        # A member only needs one matching role when a rule is non-empty.
+        allowed_roles = self._role_ids_for_guild(message, mc)
+        author_roles = getattr(message.author, "roles", ())
+        if allowed_roles and not any(
+            self._id_in_list(role.id, allowed_roles) for role in author_roles
+        ):
             return False
         bot_user = self.bot.user
         return bot_user is not None and bot_user.mentioned_in(message)

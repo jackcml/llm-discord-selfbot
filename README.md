@@ -6,7 +6,7 @@ A Discord selfbot that interfaces with any OpenAI-compatible LLM API to automati
 
 ## Features
 
-- **Mention replies**: responds when @mentioned, with optional channel and user whitelists
+- **Mention replies**: responds when @mentioned, with optional channel, user, and role whitelists
 - **Random replies**: probabilistically replies to 1 in every X messages
 - **Choice replies**: periodically reviews recent messages and picks one to reply to
 - **DM support**: always replies in 1-on-1 DMs; mention-only in group DMs (both independently toggleable)
@@ -53,8 +53,22 @@ All commands use the configured prefix (default `>`). Only the selfbot's own use
 
 See [`config.example.yaml`](config.example.yaml) for all options including:
 
-- Channel and user ID whitelists for mention/random modes
+- Channel, user, and role ID whitelists for mention replies; channel ID whitelists for random replies
 - Separate context limits for DMs vs channels
 - Vision toggle, typing delay, bot ignoring
 - Web search/fetch tool toggle and result/character limits
 - Interesting picker interval and lookback settings
+
+Mention role restrictions can be scoped per server. Each entry in
+`role_ids_by_guild` overrides the global `role_ids` fallback for that server,
+including an empty list to allow everyone:
+
+```yaml
+reply_modes:
+  mention:
+    role_ids: []
+    role_ids_by_guild:
+      "111111111111111111": [] # respond to everyone in server A
+      "222222222222222222":
+        - "333333333333333333" # only members with this role in server B
+```

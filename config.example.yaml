@@ -34,6 +34,11 @@ reply_modes:
     enabled: true
     channel_ids: [] # empty = all channels
     user_ids: [] # empty = respond to all users
+    role_ids: [] # default for servers not listed below; empty = all roles
+    role_ids_by_guild:
+      "111111111111111111": [] # no role restriction in this server
+      "222222222222222222":
+        - "333333333333333333" # require this server's role (for example, Server Booster)
 
   random:
     enabled: false
