@@ -74,17 +74,22 @@ class _DMChannel:
 
 
 def _handler(
-    *, channel_ids=None, user_ids=None, role_ids=None, role_ids_by_guild=None
+    *, channel_ids=None, user_ids=None, role_ids=None, guilds=None
 ):
     bot_user = SimpleNamespace(mentioned_in=lambda message: message.mentions_bot)
+    if guilds is None:
+        guilds = {
+            "default": {
+                "channel_ids": channel_ids or [],
+                "user_ids": user_ids or [],
+                "role_ids": role_ids or [],
+            }
+        }
     config = {
         "reply_modes": {
             "mention": {
                 "enabled": True,
-                "channel_ids": channel_ids or [],
-                "user_ids": user_ids or [],
-                "role_ids": role_ids or [],
-                "role_ids_by_guild": role_ids_by_guild or {},
+                "guilds": guilds,
             }
         }
     }
@@ -161,28 +166,77 @@ def test_mention_user_filter_still_restricts_when_no_role_filter_is_configured()
     assert handler._is_mentioned(_message(user_id=21)) is False
 
 
-def test_guild_role_rules_can_allow_everyone_in_one_guild_and_restrict_another():
+def test_guild_rules_can_allow_all_channels_in_one_guild_and_restrict_another():
     handler = _handler(
-        role_ids=[999],
-        role_ids_by_guild={
-            "1": [],
-            "2": [200],
+        guilds={
+            "default": {
+                "channel_ids": [10],
+                "user_ids": [],
+                "role_ids": [999],
+            },
+            "1": {"channel_ids": [], "role_ids": []},
+            "2": {"channel_ids": [20], "role_ids": [200]},
         },
     )
 
-    assert handler._is_mentioned(_message(guild_id=1, role_ids=[])) is True
-    assert handler._is_mentioned(_message(guild_id=2, role_ids=[200])) is True
-    assert handler._is_mentioned(_message(guild_id=2, role_ids=[201])) is False
+    assert handler._is_mentioned(_message(guild_id=1, channel_id=99)) is True
+    assert handler._is_mentioned(
+        _message(guild_id=2, channel_id=20, role_ids=[200])
+    ) is True
+    assert handler._is_mentioned(
+        _message(guild_id=2, channel_id=21, role_ids=[200])
+    ) is False
+    assert handler._is_mentioned(
+        _message(guild_id=2, channel_id=20, role_ids=[201])
+    ) is False
 
 
-def test_unlisted_guild_uses_global_role_rule():
+def test_unlisted_guild_uses_default_rules():
     handler = _handler(
-        role_ids=[999],
-        role_ids_by_guild={1: []},
+        guilds={
+            "default": {
+                "channel_ids": [10],
+                "user_ids": [],
+                "role_ids": [999],
+            },
+            1: {"channel_ids": [], "role_ids": []},
+        }
     )
 
+    assert handler._is_mentioned(_message(guild_id=1, channel_id=99)) is True
     assert handler._is_mentioned(_message(guild_id=3, role_ids=[999])) is True
     assert handler._is_mentioned(_message(guild_id=3, role_ids=[200])) is False
+    assert handler._is_mentioned(
+        _message(guild_id=3, channel_id=11, role_ids=[999])
+    ) is False
+
+
+def test_guild_rules_can_override_user_grants():
+    handler = _handler(
+        guilds={
+            "default": {"channel_ids": [], "user_ids": [20], "role_ids": []},
+            "2": {"user_ids": [21]},
+        }
+    )
+
+    assert handler._is_mentioned(_message(guild_id=1, user_id=20)) is True
+    assert handler._is_mentioned(_message(guild_id=2, user_id=20)) is False
+    assert handler._is_mentioned(_message(guild_id=2, user_id=21)) is True
+
+
+def test_legacy_flat_mention_rules_remain_supported():
+    handler = _handler()
+    handler.config["reply_modes"]["mention"] = {
+        "enabled": True,
+        "channel_ids": [10],
+        "user_ids": [20],
+        "role_ids": [30],
+        "role_ids_by_guild": {"2": []},
+    }
+
+    assert handler._is_mentioned(_message(guild_id=1, user_id=20)) is True
+    assert handler._is_mentioned(_message(guild_id=1, user_id=21)) is False
+    assert handler._is_mentioned(_message(guild_id=2, user_id=20)) is True
 
 
 def test_guild_reply_injects_aliases_renders_markup_and_stores_alias_form():

@@ -6,7 +6,7 @@ A Discord selfbot that interfaces with any OpenAI-compatible LLM API to automati
 
 ## Features
 
-- **Mention replies**: responds when @mentioned, with optional channel, user, and role whitelists
+- **Mention replies**: responds when @mentioned, with per-server channel, user, and role allowlists
 - **Random replies**: probabilistically replies to 1 in every X messages
 - **Choice replies**: periodically reviews recent messages and picks one to reply to
 - **DM support**: always replies in 1-on-1 DMs; mention-only in group DMs (both independently toggleable)
@@ -60,26 +60,36 @@ All commands use the configured prefix (default `>`). Only the selfbot's own use
 
 See [`config.example.yaml`](config.example.yaml) for all options including:
 
-- Channel, user, and role ID whitelists for mention replies; channel ID whitelists for random replies
+- Per-server channel, user, and role ID allowlists for mention replies; channel ID allowlists for random replies
 - Separate context limits for DMs vs channels
 - Vision toggle, typing delay, bot ignoring
 - Web search/fetch tool toggle and result/character limits
 - Interesting picker interval and lookback settings
 
-Mention role restrictions can be scoped per server. Each entry in
-`role_ids_by_guild` overrides the global `role_ids` fallback for that server,
-including an empty list to remove the role restriction:
+Mention restrictions are grouped by server. The `default` entry applies to
+unlisted servers and supplies fields omitted by a server entry. An explicit
+empty list removes that restriction, so a server with three empty lists is a
+free-for-all:
 
 ```yaml
 reply_modes:
   mention:
-    role_ids: []
-    role_ids_by_guild:
-      "111111111111111111": [] # respond to everyone in server A
+    guilds:
+      default:
+        channel_ids: []
+        user_ids: []
+        role_ids: []
+      "111111111111111111": # respond to everyone in every channel
+        channel_ids: []
+        user_ids: []
+        role_ids: []
       "222222222222222222":
-        - "333333333333333333" # only members with this role in server B
+        channel_ids: ["444444444444444444"] # only this channel
+        user_ids: []
+        role_ids: ["333333333333333333"]
 ```
 
-Channel restrictions always apply. User and role allowlists are alternative
-grants: a member may be allowed either by an explicit `user_ids` entry or by
-having any configured role. If both lists are empty, everyone is allowed.
+Within the applicable server rules, the channel allowlist always applies. User
+and role allowlists are alternative grants: a member may be allowed either by
+an explicit `user_ids` entry or by having any configured role. If both identity
+lists are empty, everyone is allowed.

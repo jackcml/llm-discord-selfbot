@@ -76,26 +76,46 @@ class MessageHandler:
         return any(int(x) == target_id for x in id_list)
 
     @staticmethod
-    def _role_ids_for_guild(message: discord.Message, mention_config: dict) -> list:
-        """Return a guild-specific role rule, falling back to the global rule."""
+    def _mention_rules_for_guild(
+        message: discord.Message, mention_config: dict
+    ) -> dict:
+        """Return the mention-access rules that apply to the message's guild."""
         guild = getattr(message, "guild", None)
+        guild_rules = mention_config.get("guilds")
+        if guild_rules is not None:
+            rules = dict(guild_rules.get("default", {}))
+            if guild is not None:
+                # YAML mapping keys may be quoted strings or unquoted integers.
+                override = guild_rules.get(guild.id)
+                if override is None:
+                    override = guild_rules.get(str(guild.id))
+                if override is not None:
+                    rules.update(override)
+            return rules
+
+        # Backwards compatibility for the former flat schema.
+        rules = {
+            "channel_ids": mention_config.get("channel_ids", []),
+            "user_ids": mention_config.get("user_ids", []),
+            "role_ids": mention_config.get("role_ids", []),
+        }
         role_ids_by_guild = mention_config.get("role_ids_by_guild", {})
         if guild is not None:
-            # YAML mapping keys may be quoted strings or unquoted integers.
-            if guild.id in role_ids_by_guild:
-                return role_ids_by_guild[guild.id]
-            guild_id = str(guild.id)
-            if guild_id in role_ids_by_guild:
-                return role_ids_by_guild[guild_id]
-        return mention_config.get("role_ids", [])
+            roles = role_ids_by_guild.get(guild.id)
+            if roles is None:
+                roles = role_ids_by_guild.get(str(guild.id))
+            if roles is not None:
+                rules["role_ids"] = roles
+        return rules
 
     def _is_mentioned(self, message: discord.Message) -> bool:
         """Check if the bot user is mentioned in the message."""
         mc = self.config["reply_modes"]["mention"]
         if not mc["enabled"]:
             return False
+        rules = self._mention_rules_for_guild(message, mc)
         # Channel filter: empty list = all channels
-        allowed_channels = mc.get("channel_ids", [])
+        allowed_channels = rules.get("channel_ids", [])
         if allowed_channels and not self._id_in_list(
             message.channel.id, allowed_channels
         ):
@@ -103,8 +123,8 @@ class MessageHandler:
         # User and role filters are alternative grants: an explicitly allowed user
         # does not also need an allowed role, and vice versa. When neither filter is
         # configured, all users are allowed.
-        allowed_users = mc.get("user_ids", [])
-        allowed_roles = self._role_ids_for_guild(message, mc)
+        allowed_users = rules.get("user_ids", [])
+        allowed_roles = rules.get("role_ids", [])
         author_roles = getattr(message.author, "roles", ())
         user_allowed = bool(allowed_users) and self._id_in_list(
             message.author.id, allowed_users
