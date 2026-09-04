@@ -33,8 +33,10 @@ reply_modes:
   mention:
     enabled: true
     channel_ids: [] # empty = all channels
-    user_ids: [] # empty = respond to all users
-    role_ids: [] # default for servers not listed below; empty = all roles
+    # Users may be allowed explicitly or by having any allowed role.
+    # If both user_ids and the applicable role list are empty, allow everyone.
+    user_ids: []
+    role_ids: [] # default for servers not listed below
     role_ids_by_guild:
       "111111111111111111": [] # no role restriction in this server
       "222222222222222222":

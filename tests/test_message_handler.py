@@ -136,13 +136,29 @@ def test_mention_role_filter_rejects_author_without_roles_attribute():
     assert handler._is_mentioned(message) is False
 
 
-def test_mention_must_pass_channel_user_and_role_filters():
+def test_mention_user_and_role_filters_are_alternative_grants():
     handler = _handler(channel_ids=[10], user_ids=[20], role_ids=[30])
 
     assert handler._is_mentioned(_message(role_ids=[30])) is True
+    assert handler._is_mentioned(_message(role_ids=[31])) is True
+    assert handler._is_mentioned(_message(user_id=21, role_ids=[30])) is True
+    assert handler._is_mentioned(_message(user_id=21, role_ids=[31])) is False
     assert handler._is_mentioned(_message(channel_id=11, role_ids=[30])) is False
-    assert handler._is_mentioned(_message(user_id=21, role_ids=[30])) is False
-    assert handler._is_mentioned(_message(role_ids=[31])) is False
+
+
+def test_mention_explicit_user_is_allowed_without_roles_attribute():
+    handler = _handler(user_ids=[20], role_ids=[30])
+    message = _message()
+    del message.author.roles
+
+    assert handler._is_mentioned(message) is True
+
+
+def test_mention_user_filter_still_restricts_when_no_role_filter_is_configured():
+    handler = _handler(user_ids=[20], role_ids=[])
+
+    assert handler._is_mentioned(_message(user_id=20)) is True
+    assert handler._is_mentioned(_message(user_id=21)) is False
 
 
 def test_guild_role_rules_can_allow_everyone_in_one_guild_and_restrict_another():

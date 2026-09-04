@@ -68,7 +68,7 @@ See [`config.example.yaml`](config.example.yaml) for all options including:
 
 Mention role restrictions can be scoped per server. Each entry in
 `role_ids_by_guild` overrides the global `role_ids` fallback for that server,
-including an empty list to allow everyone:
+including an empty list to remove the role restriction:
 
 ```yaml
 reply_modes:
@@ -79,3 +79,7 @@ reply_modes:
       "222222222222222222":
         - "333333333333333333" # only members with this role in server B
 ```
+
+Channel restrictions always apply. User and role allowlists are alternative
+grants: a member may be allowed either by an explicit `user_ids` entry or by
+having any configured role. If both lists are empty, everyone is allowed.

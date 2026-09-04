@@ -100,17 +100,19 @@ class MessageHandler:
             message.channel.id, allowed_channels
         ):
             return False
-        # User filter: empty list = all users
+        # User and role filters are alternative grants: an explicitly allowed user
+        # does not also need an allowed role, and vice versa. When neither filter is
+        # configured, all users are allowed.
         allowed_users = mc.get("user_ids", [])
-        if allowed_users and not self._id_in_list(message.author.id, allowed_users):
-            return False
-        # Guild-specific rules override the global role filter, including with [].
-        # A member only needs one matching role when a rule is non-empty.
         allowed_roles = self._role_ids_for_guild(message, mc)
         author_roles = getattr(message.author, "roles", ())
-        if allowed_roles and not any(
+        user_allowed = bool(allowed_users) and self._id_in_list(
+            message.author.id, allowed_users
+        )
+        role_allowed = bool(allowed_roles) and any(
             self._id_in_list(role.id, allowed_roles) for role in author_roles
-        ):
+        )
+        if (allowed_users or allowed_roles) and not (user_allowed or role_allowed):
             return False
         bot_user = self.bot.user
         return bot_user is not None and bot_user.mentioned_in(message)
