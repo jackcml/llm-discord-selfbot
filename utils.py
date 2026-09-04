@@ -2,6 +2,8 @@ import re
 
 import discord
 
+CUSTOM_EMOJI_MARKUP_RE = re.compile(r"<a?:[A-Za-z0-9_]{2,32}:\d+>")
+
 
 def clean_message_content(message: discord.Message) -> str:
     """Convert a Discord message into clean plaintext for Claude."""
@@ -92,6 +94,13 @@ def split_message(text: str, limit: int = 2000) -> list[str]:
         # Hard cut as absolute last resort
         if split_pos == -1 or split_pos < limit // 4:
             split_pos = limit
+
+        # Do not split expanded custom emoji markup into two invalid fragments.
+        markup_start = remaining.rfind("<", 0, split_pos)
+        if markup_start != -1:
+            markup = CUSTOM_EMOJI_MARKUP_RE.match(remaining, markup_start)
+            if markup is not None and markup_start < split_pos < markup.end():
+                split_pos = markup_start if markup_start > 0 else markup.end()
 
         chunks.append(remaining[:split_pos].rstrip())
         remaining = remaining[split_pos:].lstrip()

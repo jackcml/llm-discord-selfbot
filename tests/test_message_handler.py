@@ -1,6 +1,76 @@
+import asyncio
 from types import SimpleNamespace
 
+import message_handler as message_handler_module
 from message_handler import MessageHandler
+
+
+class _Emoji:
+    name = "party"
+    id = 123
+
+    @staticmethod
+    def is_usable():
+        return True
+
+    def __str__(self):
+        return "<:party:123>"
+
+
+class _GuildMessage:
+    def __init__(self):
+        self.id = 50
+        self.guild = SimpleNamespace(emojis=[_Emoji()])
+        self.channel = SimpleNamespace(id=10)
+        self.author = SimpleNamespace(id=20)
+        self.replies = []
+
+    async def reply(self, content, *, mention_author):
+        self.replies.append((content, mention_author))
+        return SimpleNamespace(id=60)
+
+
+class _ReplyLLM:
+    def __init__(self, response="sounds good :party:"):
+        self.response = response
+        self.aliases = None
+
+    async def reply(
+        self,
+        conversation,
+        *,
+        tool_activity_context,
+        custom_emoji_aliases,
+    ):
+        self.aliases = custom_emoji_aliases
+        return self.response
+
+
+class _ReplyContext:
+    channel_max_length = 500
+
+    def __init__(self):
+        self.exchange = None
+
+    def get_conversation(self, *args, **kwargs):
+        return [{"role": "user", "content": "hello"}]
+
+    def get_entry_by_message_id(self, channel_id, message_id):
+        return {"id": message_id, "content": "hello"}
+
+    def record_exchange(self, channel_id, user_id, user_entry, bot_entry):
+        self.exchange = (channel_id, user_id, user_entry, bot_entry)
+
+
+class _DMChannel:
+    id = 11
+
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, content):
+        self.sent.append(content)
+        return SimpleNamespace(id=61)
 
 
 def _handler(
@@ -97,3 +167,59 @@ def test_unlisted_guild_uses_global_role_rule():
 
     assert handler._is_mentioned(_message(guild_id=3, role_ids=[999])) is True
     assert handler._is_mentioned(_message(guild_id=3, role_ids=[200])) is False
+
+
+def test_guild_reply_injects_aliases_renders_markup_and_stores_alias_form():
+    llm = _ReplyLLM()
+    context = _ReplyContext()
+    bot_user = SimpleNamespace(id=99, display_name="Helper")
+    handler = MessageHandler(
+        SimpleNamespace(user=bot_user),
+        llm,
+        context,
+        {
+            "llm": {"vision": False},
+            "behavior": {
+                "simulated_typing_delay": False,
+                "typing_indicator": False,
+            },
+        },
+    )
+    message = _GuildMessage()
+
+    asyncio.run(handler._reply_to(message))
+
+    assert llm.aliases == (":party:",)
+    assert message.replies == [("sounds good <:party:123>", True)]
+    assert context.exchange[3]["content"] == "sounds good :party:"
+
+
+def test_dm_reply_does_not_inject_or_render_guild_emoji(monkeypatch):
+    monkeypatch.setattr(message_handler_module.discord, "DMChannel", _DMChannel)
+    llm = _ReplyLLM()
+    context = _ReplyContext()
+    handler = MessageHandler(
+        SimpleNamespace(user=SimpleNamespace(id=99, display_name="Helper")),
+        llm,
+        context,
+        {
+            "llm": {"vision": False},
+            "behavior": {
+                "simulated_typing_delay": False,
+                "typing_indicator": False,
+            },
+        },
+    )
+    channel = _DMChannel()
+    message = SimpleNamespace(
+        id=51,
+        guild=SimpleNamespace(emojis=[_Emoji()]),
+        channel=channel,
+        author=SimpleNamespace(id=21),
+    )
+
+    asyncio.run(handler._reply_to(message))
+
+    assert llm.aliases == ()
+    assert channel.sent == ["sounds good :party:"]
+    assert context.exchange is None

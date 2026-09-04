@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import llm_client as llm_client_module
 from llm_client import (
+    DISCORD_EMOJI_INSTRUCTION,
     DISCORD_REPLY_INSTRUCTION,
     LLMClient,
     TOOL_LIMIT_MESSAGE,
@@ -325,3 +326,56 @@ def test_reply_adds_discord_context_contract_to_system_prompt(monkeypatch):
     assert messages[1:] == conversation
     assert allow_tools is True
     assert passed_activity_context is activity_context
+
+
+def test_reply_adds_available_custom_emoji_to_system_prompt(monkeypatch):
+    client = object.__new__(LLMClient)
+    requests = []
+
+    monkeypatch.setattr(client, "get_system_prompt", lambda: "base prompt")
+
+    async def fake_chat(messages, allow_tools=False, tool_activity_context=None):
+        requests.append(messages)
+        return "reply"
+
+    monkeypatch.setattr(client, "_chat", fake_chat)
+
+    result = asyncio.run(
+        client.reply(
+            [{"role": "user", "content": "hello"}],
+            custom_emoji_aliases=(":apple:", ":Dance:"),
+        )
+    )
+
+    assert result == "reply"
+    assert requests[0][0] == {
+        "role": "system",
+        "content": (
+            f"base prompt\n\n{DISCORD_REPLY_INSTRUCTION}\n\n"
+            + DISCORD_EMOJI_INSTRUCTION.format(aliases=":apple: :Dance:")
+        ),
+    }
+
+
+def test_interesting_picker_prompt_includes_custom_emoji(monkeypatch):
+    client = object.__new__(LLMClient)
+    requests = []
+
+    monkeypatch.setattr(client, "get_system_prompt", lambda: "base prompt")
+
+    async def fake_chat(messages, allow_tools=False, tool_activity_context=None):
+        requests.append((messages, allow_tools))
+        return "SKIP"
+
+    monkeypatch.setattr(client, "_chat", fake_chat)
+
+    result = asyncio.run(
+        client.pick_interesting("Alice: hello", custom_emoji_aliases=(":wave:",))
+    )
+
+    assert result == "SKIP"
+    messages, allow_tools = requests[0]
+    assert messages[0]["content"] == (
+        "base prompt\n\n" + DISCORD_EMOJI_INSTRUCTION.format(aliases=":wave:")
+    )
+    assert allow_tools is False

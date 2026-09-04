@@ -11,6 +11,7 @@ A Discord selfbot that interfaces with any OpenAI-compatible LLM API to automati
 - **Choice replies**: periodically reviews recent messages and picks one to reply to
 - **DM support**: always replies in 1-on-1 DMs; mention-only in group DMs (both independently toggleable)
 - **Vision support**: understands images when using a vision-capable model
+- **Custom emoji**: can use any custom emoji available to the account in the current server
 - **Web search tool**: opt-in Chat Completions function tool for current information
 - **Conversation memory**: per-user history plus recent channel context, explicitly separated from the one Discord message the model should answer
 - **Provider-agnostic**: works with any OpenAI-compatible API (Anthropic, xAI/Grok, OpenAI, OpenRouter, etc.)
@@ -30,6 +31,12 @@ Copy `config.example.yaml` to `config.yaml` and fill in your tokens.
 ```bash
 python bot.py
 ```
+
+For guild replies, the bot reads the current server's gateway-managed emoji
+cache, exposes every emoji the account can use to the LLM as a `:name:` alias,
+and converts chosen aliases to Discord markup before sending. Emoji changes are
+picked up through Discord's normal guild update events; DMs do not receive a
+server emoji catalog.
 
 ## Commands
 

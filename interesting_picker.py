@@ -3,6 +3,7 @@ import asyncio
 import discord
 from discord.ext import commands, tasks
 
+from emoji_catalog import GuildEmojiCatalog
 from llm_client import LLMClient
 from context_manager import ContextManager
 from utils import split_message
@@ -54,13 +55,18 @@ class InterestingPicker:
             if not summary:
                 continue
 
-            result = await self.llm.pick_interesting(summary)
+            emoji_catalog = GuildEmojiCatalog.from_guild(channel.guild)
+            result = await self.llm.pick_interesting(
+                summary,
+                custom_emoji_aliases=emoji_catalog.aliases,
+            )
             if result is None or result.strip() == "SKIP":
                 continue
 
             reply_to_snippet, response_text = self._parse_pick_result(result)
             if not reply_to_snippet or not response_text:
                 continue
+            response_text = emoji_catalog.render(response_text)
 
             # Find the original message to reply to
             msg_id = self.ctx.find_message_id_by_content(channel.id, reply_to_snippet)

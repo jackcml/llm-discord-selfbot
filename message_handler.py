@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import discord
 from discord.ext import commands
 
+from emoji_catalog import GuildEmojiCatalog
 from llm_client import LLMClient
 from context_manager import ContextManager
 from utils import clean_response, split_message
@@ -142,6 +143,9 @@ class MessageHandler:
     async def _reply_to(self, message: discord.Message):
         """Generate a response and send it."""
         is_dm = isinstance(message.channel, (discord.DMChannel, discord.GroupChannel))
+        emoji_catalog = GuildEmojiCatalog.from_guild(
+            None if is_dm else getattr(message, "guild", None)
+        )
 
         # In DMs, no need for per-user conversation tracking — just use channel context.
         # The trigger ID both cuts off later chat and identifies the one message to answer;
@@ -159,15 +163,17 @@ class MessageHandler:
         response = await self.llm.reply(
             conversation,
             tool_activity_context=lambda: self._tool_typing_context(message),
+            custom_emoji_aliases=emoji_catalog.aliases,
         )
         if response is None:
             return
         response = clean_response(response)
+        rendered_response = emoji_catalog.render(response)
 
         # Simulate human typing delay based on response length
         use_delay = self.config["behavior"].get("simulated_typing_delay", False)
         if use_delay:
-            delay = self._typing_delay(response)
+            delay = self._typing_delay(rendered_response)
             if self.config["behavior"]["typing_indicator"]:
                 async with message.channel.typing():
                     await asyncio.sleep(delay)
@@ -175,7 +181,7 @@ class MessageHandler:
                 await asyncio.sleep(delay)
 
         # Split long responses into multiple messages
-        chunks = split_message(response)
+        chunks = split_message(rendered_response)
         sent_message = None
         for i, chunk in enumerate(chunks):
             if i == 0:

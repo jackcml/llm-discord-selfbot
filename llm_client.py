@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 
 from openai import AsyncOpenAI, APIConnectionError, RateLimitError, APIStatusError
@@ -25,6 +25,13 @@ DISCORD_REPLY_INSTRUCTION = (
     "enclosed in <discord_message_to_reply_to> is the only message to answer. Use "
     "the context only to understand the target, and make your final output only the "
     "reply to that target."
+)
+
+DISCORD_EMOJI_INSTRUCTION = (
+    "You may use custom emoji from the current Discord server when they fit the "
+    "conversation naturally. Emit an exact :name: alias from the available list; "
+    "do not invent custom emoji aliases. The application will convert recognized "
+    "aliases into Discord custom emoji. Available custom emoji: {aliases}"
 )
 
 WEB_SEARCH_TOOL = {
@@ -125,6 +132,7 @@ class LLMClient:
         self,
         conversation: list[dict],
         tool_activity_context: ToolActivityContext | None = None,
+        custom_emoji_aliases: Sequence[str] = (),
     ) -> str | None:
         """Send conversation history and return the response text.
 
@@ -133,7 +141,12 @@ class LLMClient:
         if not conversation:
             return None
 
-        system_content = f"{self.get_system_prompt()}\n\n{DISCORD_REPLY_INSTRUCTION}"
+        system_parts = [self.get_system_prompt(), DISCORD_REPLY_INSTRUCTION]
+        if custom_emoji_aliases:
+            system_parts.append(
+                DISCORD_EMOJI_INSTRUCTION.format(aliases=" ".join(custom_emoji_aliases))
+            )
+        system_content = "\n\n".join(system_parts)
         messages = [{"role": "system", "content": system_content}] + conversation
 
         return await self._chat(
@@ -367,14 +380,24 @@ class LLMClient:
             summary["truncated"] = payload["truncated"]
         return summary
 
-    async def pick_interesting(self, messages_summary: str) -> str | None:
+    async def pick_interesting(
+        self,
+        messages_summary: str,
+        custom_emoji_aliases: Sequence[str] = (),
+    ) -> str | None:
         """Ask the LLM to pick the most interesting message to reply to.
 
         Returns the raw response text (caller parses REPLY_TO/RESPONSE/SKIP),
         or None on error.
         """
+        system_parts = [self.get_system_prompt()]
+        if custom_emoji_aliases:
+            system_parts.append(
+                DISCORD_EMOJI_INSTRUCTION.format(aliases=" ".join(custom_emoji_aliases))
+            )
+
         messages = [
-            {"role": "system", "content": self.get_system_prompt()},
+            {"role": "system", "content": "\n\n".join(system_parts)},
             {
                 "role": "user",
                 "content": (
